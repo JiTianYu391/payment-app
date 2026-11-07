@@ -1,1 +1,16 @@
-{"dependencies":{"cookie-parser":"^1.4.6","cors":"^2.8.5","dotenv":"^16.4.5","express":"^4.21.2","express-rate-limit":"^7.4.1","helmet":"^7.2.0"},"description":"支付管理软件 — 演示版 PandaStack Apps 适配版（虚拟资金，不可提现，不接入真实支付）","engines":{"node":">=20"},"main":"app.js","name":"payment-app-pandastack","scripts":{"dev":"node --watch src/server.js","start":"node app.js"},"version":"1.0.0"}
+{
+  "name": "payment-app-v2",
+  "version": "2.0.0",
+  "description": "支付管理 + 投资演示 v2 — 正式版（虚拟资金，不可提现，不接入真实支付与真实交易）",
+  "main": "app.js",
+  "engines": { "node": ">=22.5" },
+  "scripts": { "start": "node app.js", "dev": "node --watch src/server.js", "backup": "node scripts/backup.js" },
+  "dependencies": {
+    "cookie-parser": "^1.4.6",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.2",
+    "express-rate-limit": "^7.4.1",
+    "helmet": "^7.2.0"
+  }
+}
