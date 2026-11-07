@@ -71,3 +71,35 @@
 - Mastercard Brand Center, Brand requirements — https://www.mastercard.com/brandcenter/us/en/brand-requirements/mastercard.html
 
 说明：Square Books 原文未能直接读取，相关结论来自博客归档标题和 HN 讨论中的二手描述；Stripe 角色的完整权限表以官方页面为准。
+
+---
+
+## 6. 界面排版专项调研（第二轮）
+
+第一版界面上线后逐页截图复查，发现排版问题集中在表格、筛选、设置页和空状态四处，于是补充调研了以下设计系统的具体规范。
+
+| 观察 | 来源 | SpacePay 采用方式 |
+| --- | --- | --- |
+| Carbon 数据表格：工具栏只放全局操作（搜索、复杂筛选、导出），工具栏高度与表格行高匹配；大工具栏 48px 配大行高，小工具栏 32px 配小行高 | Carbon Data table（usage / style） | 所有列表统一为「工具栏 → 可折叠筛选面板 → 已生效筛选条件 → 表格 → 分页」；导出按钮从页头移入工具栏；控件 32px、行高 44px、表头 36px |
+| 表格对齐：文字左对齐、数字右对齐，表头与该列同向对齐，不用居中；同列小数位一致；数字用等宽（tabular）数字；溢出内容要有提示 | Matt Ström《Design better data tables》、Max Masnick《Alignment in tables》等表格设计指南 | 全部表格改为单行显示，长文本截断并在悬停提示中给出全文；金额列统一右对齐、两位小数 |
+| Polaris 注释式布局：左侧标题与说明，右侧卡片放控件；只用于设置类页面，便于扫读，把「理解」和「配置」分开 | Shopify Polaris Layout、Shopify App 设计指南、Polaris 讨论 #8217 | 设置页改为左说明、右表单；输入框限宽 360px；PIN 区块按是否已设置只显示一种表单；危险操作单独放在红框卡片里 |
+| Atlassian：间距以 8px 为基准；空状态说明「没有数据」并告诉用户下一步能做什么 | Atlassian Spacing、Forge Empty state | 间距令牌改为 8px 基准（4px 为半步）；所有空表格显示原因与下一步操作，对账页未运行时给出检查项说明 |
+| GOV.UK 摘要列表：确认页用「键 / 值」行列表，便于提交前核对；不要用它展示表格数据 | GOV.UK Summary list、Check answers 模式 | 二次确认、订单核对、成交回单统一用带行分隔的键值列表 |
+| Ant Design：中后台按 24 栅格划分，横向并列的区块建议最多 4 个 | Ant Design Grid | 指标块每行最多 4 个；筛选面板 4 列栅格，日期范围与金额区间各占 2 列 |
+
+### 来源（第二轮）
+
+- Carbon Design System, Data table usage — https://carbondesignsystem.com/components/data-table/usage/
+- Carbon Design System, Data table style — https://carbondesignsystem.com/components/data-table/style
+- Shopify Polaris, Layout — https://polaris.shopify.com/components/layout
+- Shopify, App design layout — https://shopify.dev/docs/apps/design/layout
+- Shopify Polaris discussion #8217（App settings layout pattern）— https://github.com/Shopify/polaris/discussions/8217
+- Atlassian Design System, Spacing — https://atlassian.design/foundations/spacing
+- Atlassian Forge UI Kit, Empty state — https://developer.atlassian.com/platform/forge/ui-kit/components/empty-state/
+- GOV.UK Design System, Summary list — https://design-system.service.gov.uk/components/summary-list/
+- GOV.UK Design System, Check answers — https://design-system.service.gov.uk/patterns/check-answers
+- Ant Design, Grid（中文）— https://ant.design/components/grid-cn
+- Matt Ström, Design better data tables — https://mattstromawn.com/writing/tables/
+- Max Masnick, Alignment in tables — https://maxmasnick.nfshost.com/projects/datatips/guidelines/alignment-in-tables
+
+说明：本轮检索没有拿到 Nielsen Norman Group 关于表格的原文，表格对齐结论来自上面两篇设计指南，彼此一致。
