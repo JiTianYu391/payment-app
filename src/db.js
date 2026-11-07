@@ -1,31 +1,30 @@
-// 数据层 — PandaStack Apps 适配版
+// 数据层 — FadeHost 适配版
 // 与 Serv00 版相同的对外接口：{ db, audit, withTransaction }
 //   db.prepare(sql).get(...params) / .all(...params) / .run(...params)
 //   db.exec(sql) / withTransaction(fn) / audit(userId, email, action, detail, ip)
 //
 // 后端选择（按顺序）：
 //   1) DATABASE_PATH 以 .json 结尾，或 DB_BACKEND=json → 直接用 JSON 后端；
-//   2) 否则尝试 Node 内置 node:sqlite（需要 Node >= 22.5；PandaStack 基础镜像
-//      为 Ubuntu 24.04 + Node 24 LTS，.nvmrc 已锁定 Node 22，走这条路）；
+//   2) 否则尝试 Node 内置 node:sqlite（需要 Node >= 22.5，走这条路）；
 //   3) node:sqlite 加载失败 → 自动降级到 JSON 后端，不报错、不中断。
 // JSON 后端：纯 JS，无原生编译，在 Node 18+ 上即可运行；数据存在 app.json，
 // 原子写入（写临时文件再重命名）。演示规模下完全够用；PandaStack 上应用是
 // 单进程运行，不存在多进程同时写同一文件的问题。
 //
 // DATABASE_PATH 默认值（未设置环境变量时）：
-//   - /workspace 存在时 → /workspace/data/app.json（PandaStack 卷挂载点，
-//     正式部署时请在控制台 Volumes 页创建 1 GiB 卷挂载到 /workspace/data，
-//     这样数据才能跨部署、跨休眠保留；见 README-pandastack.md 第 5 节）；
-//   - /workspace 不存在时（本地开发）→ ./data/app.json。
-// 注意：PandaStack 每次部署都是全新机器、休眠会释放沙箱，官方文档说明
-// 休眠后只保留部署时 baked 的产物，所以不要把正式数据只放在仓库目录里。
+//   - /data 存在时 → /data/app.json（FadeHost 持久盘，免费版 3GB，
+//     数据存在这里才能跨部署、跨重启保留；仓库目录是只读的）；
+//   - /workspace 存在时 → /workspace/data/app.json（PandaStack 卷挂载点，兼容旧版）；
+//   - 都不存在时（本地开发）→ ./data/app.json。
 const fs = require('fs');
 const path = require('path');
 
-// DATABASE_PATH 默认值：优先用 PandaStack 卷挂载点 /workspace/data/app.json
-//（/workspace 存在时），本地开发时回退到项目内 ./data/app.json。
+// DATABASE_PATH 默认值：优先用 FadeHost 持久盘 /data/app.json
+//（/data 存在时），其次 PandaStack 卷 /workspace/data/app.json，
+//本地开发时回退到项目内 ./data/app.json。
 function defaultDbPath() {
   try {
+    if (fs.existsSync('/data')) return '/data/app.json';
     if (fs.existsSync('/workspace')) return '/workspace/data/app.json';
   } catch (_) { /* 忽略 */ }
   return path.join(__dirname, '..', 'data', 'app.json');

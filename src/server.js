@@ -1,8 +1,8 @@
 /**
- * 支付管理软件 — 演示版（PandaStack Apps 适配版）
+ * 支付管理软件 — 演示版（FadeHost 适配版）
  * 虚拟资金，不可提现，不接入任何真实支付（Stripe/PayPal 均未接入）
  * 技术栈：Node.js 20+ + Express + JSON 文件存储 / node:sqlite（自动选择，见 src/db.js）
- * 运行环境：PandaStack Apps（Git 应用托管，Firecracker 微虚拟机，Ubuntu 24.04）
+ * 运行环境：FadeHost（Git 应用托管，Firecracker 微虚拟机，Ubuntu 24.04）
  *   - 平台自动检测 package.json，执行 npm install 后用 npm start（node app.js）启动；
  *     平台自动注入 $PORT（默认 3000）与 $HOST，应用必须监听 process.env.PORT
  *     并绑定 0.0.0.0（见文件末尾的 app.listen）。
@@ -342,7 +342,7 @@ app.get('/api/me', auth, (req, res) => res.json({ ok: true, user: req.user }));
 // SPA fallback
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'index.html')));
 
-// ---- PandaStack Apps：平台自动注入 $PORT（默认 3000）与 $HOST，
+// ---- FadeHost：平台自动注入 $PORT（默认 3000）与 $HOST，
 // 应用必须监听 process.env.PORT 并绑定 0.0.0.0；部署时的健康检查会请求该端口。
 // 本地开发时 PORT 未设置则默认 3000。
 app.listen(PORT, '0.0.0.0', () => {
