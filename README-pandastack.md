@@ -1,4 +1,4 @@
-# 支付管理软件 — PandaStack Apps 部署指南（演示版）
+# SpacePay — PandaStack Apps 部署指南（演示环境）
 
 > **重要声明：这是演示版，只用虚拟资金**，不可提现，不接入 Stripe / PayPal 等任何真实支付渠道，不可用于真实结算。真实支付需要合规支付通道 + 安全审计。
 
@@ -49,7 +49,7 @@ PandaStack Apps 是 Git 驱动的：你在控制台填 Git 仓库地址，平台
 cd ~/workspace/payment-app-deploy-pandastack
 git init
 git add .
-git commit -m "支付管理软件 PandaStack Apps 部署版"
+git commit -m "SpacePay PandaStack Apps 部署版"
 git branch -M main
 git remote add origin https://github.com/<你的用户名>/payment-app.git
 git push -u origin main

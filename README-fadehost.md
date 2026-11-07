@@ -1,4 +1,4 @@
-# 支付管理软件 — FadeHost 部署版（虚拟 $50 体验金演示版）
+# SpacePay — FadeHost 部署说明（演示环境）
 
 - 来源：PandaStack 部署包改编，逻辑不变（邮箱注册 + 6 位验证码、新用户虚拟 $50、支付 PIN、转账/账单）。
 - FadeHost 免费版：1 个 App，不用卡，256MB / 0.25 vCPU，/data 下 3GB 持久盘。

@@ -1,4 +1,4 @@
-// 数据层 — v2 正式版（FadeHost 适配）
+// SpacePay 数据层（FadeHost / PandaStack 适配）
 // SQLite 单文件优先（node:sqlite，无原生编译），JSON 文件为同 API 降级后端。
 // 默认路径：/data/app.db（SQLite）/ /data/app.json（JSON 降级）；本地 ./data/。
 // 首次以 SQLite 启动且存在旧版 /data/app.json 时，自动迁移旧用户/钱包/账单后改名 .migrated.json（不删除）。
