@@ -82,7 +82,8 @@ function createApp() {
     res.on('finish', () => {
       if (!req.path.startsWith('/api/')) return;
       const ms = Number(process.hrtime.bigint() - start) / 1e6;
-      const level = res.statusCode >= 500 ? 'error' : res.statusCode >= 400 ? 'warn' : 'info';
+      // 428（等待二次确认）是正常流程，不算告警
+      const level = res.statusCode >= 500 ? 'error' : res.statusCode >= 400 && res.statusCode !== 428 ? 'warn' : 'info';
       req.log[level]('http.request', { method: req.method, path: req.path, status: res.statusCode, duration_ms: Math.round(ms), user_id: req.user ? req.user.id : undefined, ip: req.clientIp });
     });
     next();
