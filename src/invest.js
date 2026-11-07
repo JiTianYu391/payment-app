@@ -411,6 +411,8 @@ module.exports = function mountInvest(app, ctx) {
   app.get('/api/performance', auth, (req, res) => {
     const range = String(req.query.range || '1M').toUpperCase();
     const day = prod.currentDay(db);
+    // 先刷新当日快照：转账、付款、充值等非投资操作不会更新快照，若不刷新，期末值会滞后于当日资金流，导致回报率失真
+    withTransaction(() => prod.snapshotUser(db, req.user.id, day));
     const windowDays = range === '1D' ? 2 : range === '1W' ? 8 : range === '1M' ? 31 : range === '1Y' ? 366 : 10000;
     const snaps = db.prepare('SELECT * FROM portfolio_snapshots WHERE user_id = ? ORDER BY simulated_day ASC').all(req.user.id);
     const series = snaps.slice(-windowDays);

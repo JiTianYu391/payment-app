@@ -321,6 +321,16 @@ module.exports = function scenario(env) {
     await reconcileOk();
   });
 
+  test('收益率：当日只有资金进出（无价格变化）时 TWR 为 0，不受快照滞后影响', async () => {
+    const fay = await t.signup('fay@spacepay.test');
+    await t.call('POST', '/api/topup', { token: fay.token, body: { amount: '100.00' } });
+    await t.call('POST', '/api/transfer', { token: fay.token, body: { to_email: bob.email, amount: '10.00', pin: fay.pin } });
+    const perf = await t.call('GET', '/api/performance?range=1M', { token: fay.token });
+    assert.equal(perf.status, 200);
+    assert.ok(Math.abs(perf.body.twr_pct) < 1e-9, 'twr=' + perf.body.twr_pct);
+    assert.equal(perf.body.series[perf.body.series.length - 1].total_cents, 14000);
+  });
+
   test('演示重置：账本只追加，用冲正分录清零后重新发放体验金', async () => {
     const r = await t.call('POST', '/api/demo/reset', { token: alice.token, body: { password: alice.password } });
     assert.equal(r.status, 200, JSON.stringify(r.body));
