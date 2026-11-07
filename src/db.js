@@ -1,4 +1,7 @@
-// 数据层 — FadeHost 适配版
+// 数据层 — v2 正式版（FadeHost 适配）
+// SQLite 单文件优先（node:sqlite，无原生编译），JSON 文件为同 API 降级后端。
+// 默认路径：/data/app.db（SQLite）/ /data/app.json（JSON 降级）；本地 ./data/。
+// 首次以 SQLite 启动且存在旧版 /data/app.json 时，自动迁移旧用户/钱包/账单后改名 .migrated.json（不删除）。
 // 与 Serv00 版相同的对外接口：{ db, audit, withTransaction }
 //   db.prepare(sql).get(...params) / .all(...params) / .run(...params)
 //   db.exec(sql) / withTransaction(fn) / audit(userId, email, action, detail, ip)
@@ -19,28 +22,54 @@
 const fs = require('fs');
 const path = require('path');
 
-// DATABASE_PATH 默认值：优先用 FadeHost 持久盘 /data/app.json
-//（/data 存在时），其次 PandaStack 卷 /workspace/data/app.json，
-//本地开发时回退到项目内 ./data/app.json。
+// DATABASE_PATH 默认值：优先用 FadeHost 持久盘 /data/app.db（SQLite），
+// 其次 /workspace/data/app.db，本地开发回退到项目内 ./data/app.db。
+// 若 DATABASE_PATH 以 .json 结尾或 DB_BACKEND=json，则走 JSON 后端（见 forceJson）。
 function defaultDbPath() {
   try {
-    if (fs.existsSync('/data')) return '/data/app.json';
-    if (fs.existsSync('/workspace')) return '/workspace/data/app.json';
+    if (fs.existsSync('/data')) return '/data/app.db';
+    if (fs.existsSync('/workspace')) return '/workspace/data/app.db';
   } catch (_) { /* 忽略 */ }
-  return path.join(__dirname, '..', 'data', 'app.json');
+  return path.join(__dirname, '..', 'data', 'app.db');
+}
+function legacyJsonPath() {
+  // 旧版 v1 的 JSON 文件位置（用于首次迁移）
+  try {
+    if (fs.existsSync('/data/app.json')) return '/data/app.json';
+    if (fs.existsSync('/workspace/data/app.json')) return '/workspace/data/app.json';
+    const sibling = dbPath.replace(/\.db$/i, '.json');
+    if (sibling !== dbPath && fs.existsSync(sibling)) return sibling;
+  } catch (_) {}
+  const local = path.join(__dirname, '..', 'data', 'app.json');
+  return fs.existsSync(local) ? local : null;
 }
 const dbPath = process.env.DATABASE_PATH || defaultDbPath();
 const forceJson = process.env.DB_BACKEND === 'json' || /\.json$/i.test(dbPath);
 
-const SCHEMA_TABLES = ['users', 'verification_codes', 'demo_inbox', 'sessions', 'wallets', 'transactions', 'audit_logs'];
+const SCHEMA_TABLES = ['users', 'verification_codes', 'demo_inbox', 'sessions', 'wallets', 'transactions', 'audit_logs',
+  'products', 'price_snapshots', 'holdings', 'holding_lots', 'orders', 'portfolio_snapshots', 'dividends', 'watchlist', 'alerts', 'goals', 'fixed_deposits', 'risk_targets'];
 // 有自增 id 的表；wallets 的主键是 user_id，没有 id 列
-const AUTO_ID_TABLES = new Set(['users', 'verification_codes', 'demo_inbox', 'sessions', 'transactions', 'audit_logs']);
+const AUTO_ID_TABLES = new Set(['users', 'verification_codes', 'demo_inbox', 'sessions', 'transactions', 'audit_logs',
+  'price_snapshots', 'holding_lots', 'orders', 'portfolio_snapshots', 'dividends', 'alerts', 'goals', 'fixed_deposits']);
 // SQLite 建表语句里的列默认值（与原版 src/db.js 的 CREATE TABLE 一致）。
 // JSON 后端插入时未指定的列要补上这些默认值，否则 `used = 0` 这类查询会查不到行。
 const COLUMN_DEFAULTS = {
-  users: { pin_salt: null, pin_hash: null, failed_login_attempts: 0, locked_until: null },
+  users: { pin_salt: null, pin_hash: null, failed_login_attempts: 0, locked_until: null, risk_level: null, risk_score: null },
   verification_codes: { attempts: 0, used: 0 },
   wallets: { balance_cents: 0 },
+  transactions: { product_id: null, order_id: null, counterparty_email: null, merchant: null, category: null },
+  products: { dividend_yield: 0, is_active: 1, tradeable: 1 },
+  price_snapshots: {},
+  holdings: { quantity_milli: 0 },
+  holding_lots: { quantity_milli: 0 },
+  orders: { fee_cents: 0, realized_pl_cents: 0, status: 'FILLED', filled_at: null },
+  portfolio_snapshots: {},
+  dividends: {},
+  watchlist: {},
+  alerts: { status: 'ACTIVE', last_fired_at: null },
+  goals: {},
+  fixed_deposits: { status: 'ACTIVE' },
+  risk_targets: {},
 };
 function applyDefaults(table, row) {
   const defs = COLUMN_DEFAULTS[table];
@@ -62,6 +91,8 @@ function createSqliteBackend() {
   fs.mkdirSync(path.dirname(sqlitePath), { recursive: true });
   const db = new DatabaseSync(sqlitePath);
   db.exec('PRAGMA journal_mode = WAL;');
+  db.exec('PRAGMA busy_timeout = 5000;');
+  db.exec('PRAGMA synchronous = NORMAL;');
   db.exec('PRAGMA foreign_keys = ON;');
   db.exec(`
 CREATE TABLE IF NOT EXISTS users (
@@ -74,6 +105,8 @@ CREATE TABLE IF NOT EXISTS users (
   pin_hash TEXT,
   failed_login_attempts INTEGER NOT NULL DEFAULT 0,
   locked_until INTEGER,
+  risk_level TEXT,
+  risk_score INTEGER,
   created_at INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS verification_codes (
@@ -117,6 +150,9 @@ CREATE TABLE IF NOT EXISTS transactions (
   merchant TEXT,
   category TEXT,
   description TEXT,
+  product_id TEXT,
+  order_id INTEGER,
+  sim_day INTEGER,
   created_at INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS audit_logs (
@@ -127,6 +163,114 @@ CREATE TABLE IF NOT EXISTS audit_logs (
   detail TEXT,
   ip TEXT,
   created_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS products (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  type TEXT NOT NULL,
+  risk TEXT NOT NULL,
+  base_price_cents INTEGER NOT NULL,
+  mu REAL NOT NULL,
+  sigma REAL NOT NULL,
+  dividend_yield REAL NOT NULL DEFAULT 0,
+  price_seed INTEGER NOT NULL,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  tradeable INTEGER NOT NULL DEFAULT 1
+);
+CREATE TABLE IF NOT EXISTS price_snapshots (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  product_id TEXT NOT NULL REFERENCES products(id),
+  simulated_day INTEGER NOT NULL,
+  price_cents INTEGER NOT NULL,
+  created_at INTEGER NOT NULL,
+  UNIQUE(product_id, simulated_day)
+);
+CREATE TABLE IF NOT EXISTS holdings (
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  product_id TEXT NOT NULL REFERENCES products(id),
+  quantity_milli INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY(user_id, product_id)
+);
+CREATE TABLE IF NOT EXISTS holding_lots (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  product_id TEXT NOT NULL REFERENCES products(id),
+  order_id INTEGER REFERENCES orders(id),
+  quantity_milli INTEGER NOT NULL,
+  unit_cost_cents INTEGER NOT NULL,
+  bought_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS orders (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  product_id TEXT NOT NULL REFERENCES products(id),
+  side TEXT NOT NULL,
+  quantity_milli INTEGER NOT NULL,
+  price_cents INTEGER NOT NULL,
+  total_cents INTEGER NOT NULL,
+  fee_cents INTEGER NOT NULL DEFAULT 0,
+  realized_pl_cents INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'FILLED',
+  idempotency_key TEXT UNIQUE,
+  created_at INTEGER NOT NULL,
+  filled_at INTEGER
+);
+CREATE TABLE IF NOT EXISTS portfolio_snapshots (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  snapshot_date TEXT NOT NULL,
+  simulated_day INTEGER NOT NULL,
+  cash_cents INTEGER NOT NULL,
+  invested_cents INTEGER NOT NULL,
+  total_cents INTEGER NOT NULL,
+  UNIQUE(user_id, snapshot_date)
+);
+CREATE TABLE IF NOT EXISTS dividends (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  product_id TEXT NOT NULL REFERENCES products(id),
+  amount_cents INTEGER NOT NULL,
+  ex_date TEXT,
+  paid_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS watchlist (
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  product_id TEXT NOT NULL REFERENCES products(id),
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY(user_id, product_id)
+);
+CREATE TABLE IF NOT EXISTS alerts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  product_id TEXT NOT NULL REFERENCES products(id),
+  condition TEXT NOT NULL,
+  threshold_cents INTEGER NOT NULL,
+  mode TEXT NOT NULL DEFAULT 'ONCE',
+  status TEXT NOT NULL DEFAULT 'ACTIVE',
+  last_fired_at INTEGER
+);
+CREATE TABLE IF NOT EXISTS goals (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  target_cents INTEGER NOT NULL,
+  target_date TEXT,
+  created_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS fixed_deposits (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  product_id TEXT NOT NULL REFERENCES products(id),
+  principal_cents INTEGER NOT NULL,
+  rate_bps INTEGER NOT NULL,
+  start_day INTEGER NOT NULL,
+  maturity_day INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'ACTIVE'
+);
+CREATE TABLE IF NOT EXISTS risk_targets (
+  user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  weights_json TEXT NOT NULL,
+  updated_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_tx_user_created ON transactions(user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_audit_user_created ON audit_logs(user_id, created_at DESC);
@@ -252,6 +396,23 @@ function createJsonBackend() {
     return parseSingleCondition(part, nextParam);
   }
   function parseSingleCondition(cond, nextParam) {
+    // IN / NOT IN（字面量列表，如 type IN ('bonus','topup')）
+    let mIn = cond.match(/^(\w+)\s+(NOT\s+)?IN\s*\(([^)]*)\)$/i);
+    if (mIn) {
+      const col = mIn[1], neg = !!mIn[2];
+      const vals = mIn[3].split(',').map((s) => {
+        s = s.trim();
+        if (s === '?') return nextParam();
+        if (/^NULL$/i.test(s)) return null;
+        if (s.startsWith("'") && s.endsWith("'")) return s.slice(1, -1);
+        return Number(s);
+      });
+      return (row) => {
+        const v = row[col];
+        const hit = vals.some((x) => (x == null ? v == null : (typeof v === 'number' || typeof x === 'number' ? Number(v) === Number(x) : v === x)));
+        return neg ? !hit : hit;
+      };
+    }
     let m = cond.match(/^(\w+)\s+IS\s+(NOT\s+)?NULL$/i);
     if (m) {
       const col = m[1], neg = !!m[2];
@@ -432,9 +593,14 @@ function createJsonBackend() {
             else if (/^-?\d+(?:\.\d+)?$/.test(expr)) { const v = Number(expr); fn = () => v; }
             else if (expr.startsWith("'")) { const v = expr.slice(1, -1); fn = () => v; }
             else {
-              const em = expr.match(/^(\w+)\s*([+-])\s*(\d+(?:\.\d+)?)$/);
+              const em = expr.match(/^(\w+)\s*([+-])\s*(\d+(?:\.\d+)?|\?)$/);
               if (!em) throw new Error('JSON 后端不支持的 SET 表达式: ' + expr);
-              fn = (row) => (Number(row[em[1]]) || 0) + (em[2] === '+' ? Number(em[3]) : -Number(em[3]));
+              if (em[3] === '?') { // col +/- ?（占位符操作数，如 quantity_milli = quantity_milli + ?）
+                const v = params[p++];
+                fn = (row) => (Number(row[em[1]]) || 0) + (em[2] === '+' ? Number(v) : -Number(v));
+              } else {
+                fn = (row) => (Number(row[em[1]]) || 0) + (em[2] === '+' ? Number(em[3]) : -Number(em[3]));
+              }
             }
             return { col, fn };
           });
@@ -546,4 +712,48 @@ if (forceJson) {
 }
 console.log('[payment-app] 数据后端: ' + backendName + (backendName === 'json' ? ' (' + jsonPathInfo + ')' : ' (' + dbPath + ')'));
 
-module.exports = { db: impl.db, audit: impl.audit, withTransaction: impl.withTransaction };
+// ---------- v1 JSON -> SQLite 一次性迁移 ----------
+// 仅当使用 SQLite 且 users 表为空、且存在旧版 app.json 时执行；迁移后把旧文件改名
+// 为 .migrated.json（永不删除）。JSON 后端本身不需要迁移（同一文件格式）。
+function migrateLegacyJson() {
+  if (backendName !== 'sqlite') return;
+  try {
+    const count = impl.db.prepare('SELECT COUNT(*) as c FROM users').get().c;
+    if (count > 0) return;
+    const legacy = legacyJsonPath();
+    if (!legacy) return;
+    const raw = fs.readFileSync(legacy, 'utf8');
+    const store = JSON.parse(raw);
+    if (!store || !store.tables || !Array.isArray(store.tables.users) || !store.tables.users.length) return;
+    // v1 七表 + v2 投资表（orders 在 holding_lots 之前，满足 FK 顺序；v1 文件里没有的表按空处理）
+    const tables = ['users', 'verification_codes', 'demo_inbox', 'sessions', 'wallets', 'transactions', 'audit_logs',
+      'products', 'orders', 'holdings', 'holding_lots', 'price_snapshots', 'portfolio_snapshots', 'dividends',
+      'watchlist', 'alerts', 'goals', 'fixed_deposits', 'risk_targets'];
+    impl.db.exec('BEGIN IMMEDIATE');
+    try {
+      for (const table of tables) {
+        const realCols = new Set(impl.db.prepare('PRAGMA table_info(' + table + ')').all().map((c) => c.name));
+        const rows = store.tables[table] || [];
+        for (const row of rows) {
+          const r = applyDefaults(table, { ...row });
+          const cols = Object.keys(r).filter((c) => r[c] !== undefined && realCols.has(c));
+          if (!cols.length) continue;
+          const placeholders = cols.map(() => '?').join(',');
+          impl.db.prepare(`INSERT OR IGNORE INTO ${table} (${cols.join(',')}) VALUES (${placeholders})`)
+            .run(...cols.map((c) => r[c]));
+        }
+      }
+      impl.db.exec('COMMIT');
+    } catch (e) {
+      try { impl.db.exec('ROLLBACK'); } catch (_) {}
+      throw e;
+    }
+    fs.renameSync(legacy, legacy + '.migrated.json');
+    console.log('[payment-app] 已从旧版 JSON 迁移用户数据: ' + legacy + ' -> ' + legacy + '.migrated.json');
+  } catch (e) {
+    console.warn('[payment-app] 旧版 JSON 迁移跳过/失败: ' + e.message);
+  }
+}
+migrateLegacyJson();
+
+module.exports = { db: impl.db, audit: impl.audit, withTransaction: impl.withTransaction, backend: backendName, dbPath };

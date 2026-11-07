@@ -1,4 +1,5 @@
 /**
+ * 支付管理 + 投资演示 — v2 正式版（FadeHost 适配）
  * 支付管理软件 — 演示版（FadeHost 适配版）
  * 虚拟资金，不可提现，不接入任何真实支付（Stripe/PayPal 均未接入）
  * 技术栈：Node.js 20+ + Express + JSON 文件存储 / node:sqlite（自动选择，见 src/db.js）
@@ -85,13 +86,17 @@ function requirePin(req, res, next) {
   next();
 }
 function addTransaction(userId, type, amountCents, balanceAfter, opts = {}) {
-  db.prepare(`INSERT INTO transactions (user_id, type, amount_cents, balance_after_cents, counterparty_email, merchant, category, description, created_at)
-    VALUES (?,?,?,?,?,?,?,?,?)`).run(userId, type, amountCents, balanceAfter,
-    opts.counterparty || null, opts.merchant || null, opts.category || null, opts.description || '', now());
+  db.prepare(`INSERT INTO transactions (user_id, type, amount_cents, balance_after_cents, counterparty_email, merchant, category, description, product_id, order_id, sim_day, created_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).run(userId, type, amountCents, balanceAfter,
+    opts.counterparty || null, opts.merchant || null, opts.category || null, opts.description || '',
+    opts.product_id || null, opts.order_id || null, require('./products').currentDay(db), now());
 }
 
+// ---------- 投资系统（v2，见 src/invest.js + src/products.js） ----------
+const investStatus = require('./invest')(app, { db, audit, withTransaction, sec });
+
 // ---------- 健康检查 ----------
-app.get('/api/health', (req, res) => res.json({ ok: true, demo: DEMO_MODE, welcome_bonus_cents: WELCOME_BONUS_CENTS, time: new Date().toISOString() }));
+app.get('/api/health', (req, res) => res.json({ ok: true, demo: DEMO_MODE, welcome_bonus_cents: WELCOME_BONUS_CENTS, time: new Date().toISOString(), invest: investStatus.status() }));
 
 // ---------- 验证码（演示模式：显示在应用内演示收件箱） ----------
 app.post('/api/auth/request-code', (req, res) => {
@@ -160,6 +165,7 @@ app.post('/api/auth/register', (req, res) => {
       return u.lastInsertRowid;
     });
   } catch (e) { return res.status(500).json({ ok: false, error: '注册失败，请重试' }); }
+  try { require('./products').backfillCashHistory(db, userId, WELCOME_BONUS_CENTS); } catch (_) { /* 快照失败不阻塞注册 */ }
   audit(userId, email, 'register', `新用户注册，赠送 $${centsToDollars(WELCOME_BONUS_CENTS)} 虚拟体验金`, clientIp(req));
   return res.json({ ok: true, message: `注册成功，已到账 $${centsToDollars(WELCOME_BONUS_CENTS)} 虚拟体验金（不可提现）` });
 });

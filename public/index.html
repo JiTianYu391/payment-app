@@ -3,113 +3,294 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>支付管理 · 演示版</title>
+<title>支付管理 · 投资演示 — v2 正式版</title>
 <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
+<div class="sim-banner" role="note">SIMULATED DEMO — 模拟演示 · 仅使用虚拟资金，不涉及真实资金、真实交易，不可提现。价格为模拟价格，不构成投资建议。 / Virtual money only. No real money, no real trades, no withdrawals.</div>
+
 <header class="topbar">
-  <div class="brand">💳 支付管理 <span class="badge">演示版 · 虚拟资金</span></div>
-  <div id="topUser" class="top-user"></div>
+  <div class="brand"><span class="brand-mark">◆</span> 支付管理 <span class="brand-sub">· 投资演示</span> <span class="badge">v2 正式版</span></div>
+  <div class="top-right"><span id="simDay" class="sim-day"></span><span id="topUser" class="top-user"></span></div>
 </header>
 
-<main class="wrap">
-  <p class="notice">⚠️ 本应用为演示版：所有资金均为 <b>虚拟资金，不可提现</b>，不接入任何真实支付。新用户注册即送 <b>$50.00 虚拟体验金</b>。</p>
+<div class="layout">
+  <nav class="sidebar" aria-label="主导航">
+    <button class="nav-item active" data-view="home" onclick="showView('home')">首页</button>
+    <button class="nav-item" data-view="invest" onclick="showView('invest')">投资</button>
+    <button class="nav-item" data-view="wallet" onclick="showView('wallet')">钱包</button>
+    <button class="nav-item" data-view="activity" onclick="showView('activity')">流水</button>
+    <button class="nav-item" data-view="settings" onclick="showView('settings')">设置</button>
+    <div class="side-note">演示版 · 虚拟资金<br>数据截至模拟日 <span id="sideDay">—</span><br>每小时推进 1 个模拟日</div>
+    <button class="btn ghost" onclick="doLogout()">退出登录</button>
+  </nav>
 
-  <!-- 认证区 -->
-  <section id="authCard" class="card">
-    <div class="tabs">
-      <button id="tabLogin" class="tab active" onclick="showTab('login')">登录</button>
-      <button id="tabRegister" class="tab" onclick="showTab('register')">邮箱注册</button>
-    </div>
-
-    <div id="loginPane">
-      <label>邮箱<input id="loginEmail" type="email" placeholder="you@example.com" autocomplete="email"></label>
-      <label>密码<input id="loginPassword" type="password" placeholder="至少 8 位" autocomplete="current-password"></label>
-      <button class="btn primary" onclick="doLogin()">登录</button>
-      <p class="hint">登录错 5 次锁定 15 分钟。</p>
-    </div>
-
-    <div id="registerPane" hidden>
-      <label>邮箱<input id="regEmail" type="email" placeholder="you@example.com"></label>
-      <div class="row">
-        <input id="regCode" placeholder="6 位验证码" maxlength="6" style="flex:1">
-        <button class="btn" onclick="requestCode()">获取验证码</button>
+  <main class="wrap">
+    <!-- 认证区 -->
+    <section id="authCard" class="card">
+      <h2>登录 / 邮箱注册</h2>
+      <p class="hint">演示账号：邮箱 + 密码登录；新用户注册即送 $50.00 虚拟体验金（不可提现）。</p>
+      <div class="tabs">
+        <button id="tabLogin" class="tab active" onclick="showTab('login')">登录</button>
+        <button id="tabRegister" class="tab" onclick="showTab('register')">邮箱注册</button>
       </div>
-      <button class="btn" onclick="showDemoInbox()">📬 查看演示收件箱</button>
-      <div id="demoInbox" class="inbox" hidden></div>
-      <label>昵称<input id="regNickname" placeholder="例如 JiTianYu391" maxlength="30"></label>
-      <label>密码<input id="regPassword" type="password" placeholder="至少 8 位" autocomplete="new-password"></label>
-      <button class="btn primary" onclick="doRegister()">注册并领取 $50 体验金</button>
-      <p class="hint">注册成功立即到账 $50.00 虚拟体验金。验证码 10 分钟有效，最多试 5 次。</p>
-    </div>
-    <p id="authMsg" class="msg"></p>
-  </section>
+      <div id="loginPane">
+        <label>邮箱<input id="loginEmail" type="email" placeholder="you@example.com" autocomplete="email"></label>
+        <label>密码<input id="loginPassword" type="password" placeholder="至少 8 位" autocomplete="current-password"></label>
+        <button class="btn primary" onclick="doLogin()">登录</button>
+        <p class="hint">登录错 5 次锁定 15 分钟。</p>
+      </div>
+      <div id="registerPane" hidden>
+        <label>邮箱<input id="regEmail" type="email" placeholder="you@example.com"></label>
+        <div class="row">
+          <input id="regCode" placeholder="6 位验证码" maxlength="6" style="flex:1">
+          <button class="btn" onclick="requestCode()">获取验证码</button>
+        </div>
+        <button class="btn" onclick="showDemoInbox()">查看演示收件箱</button>
+        <div id="demoInbox" class="inbox" hidden></div>
+        <label>昵称<input id="regNickname" placeholder="例如 JiTianYu391" maxlength="30"></label>
+        <label>密码<input id="regPassword" type="password" placeholder="至少 8 位" autocomplete="new-password"></label>
+        <button class="btn primary" onclick="doRegister()">注册并领取 $50 体验金</button>
+        <p class="hint">注册成功立即到账 $50.00 虚拟体验金。验证码 10 分钟有效，最多试 5 次。</p>
+      </div>
+      <p id="authMsg" class="msg"></p>
+    </section>
 
-  <!-- 主应用 -->
-  <section id="appCard" hidden>
-    <div class="grid">
-      <div class="card balance">
-        <div class="label">我的余额（虚拟）</div>
-        <div class="amount" id="balanceAmount">$0.00</div>
-        <div class="sub" id="balanceSub">USD · 不可提现</div>
-        <div class="actions">
-          <button class="btn primary" onclick="openModal('topupModal')">演示充值</button>
-          <button class="btn" onclick="openModal('transferModal')">转账</button>
-          <button class="btn" onclick="openModal('payModal')">付款 / 缴费</button>
-          <button class="btn danger" onclick="doLogout()">退出</button>
+    <!-- ============ 首页 ============ -->
+    <section id="view-home" class="view" hidden>
+      <div class="card hero">
+        <div class="label">总资产（现金 + 投资市值）· 模拟</div>
+        <div class="total" id="totalAssets">$0.00</div>
+        <div class="capsules">
+          <span class="capsule" id="todayPl">今日盈亏 —</span>
+          <span class="capsule" id="totalReturn">累计回报 —</span>
+          <span class="capsule muted" id="asOf">—</span>
+        </div>
+        <div class="splitbar" id="splitBar" title="现金 vs 投资占比"></div>
+        <div class="split-legend" id="splitLegend"></div>
+        <div class="hero-actions">
+          <button class="btn primary" onclick="showView('invest')">去投资</button>
+          <button class="btn" onclick="showView('wallet')">钱包转账</button>
+          <button class="btn" onclick="togglePrivacy()" id="privacyBtn">隐藏金额</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>资产走势</h3>
+          <div class="range-tabs" id="rangeTabs">
+            <button data-r="1D" onclick="setRange('1D')">1D</button>
+            <button data-r="1W" onclick="setRange('1W')">1W</button>
+            <button data-r="1M" class="active" onclick="setRange('1M')">1M</button>
+            <button data-r="1Y" onclick="setRange('1Y')">1Y</button>
+            <button data-r="ALL" onclick="setRange('ALL')">全部</button>
+          </div>
+        </div>
+        <canvas id="perfChart" width="860" height="240"></canvas>
+        <p class="hint" id="perfNote">总资产曲线（含体验金/充值等资金进出，不等于投资回报；回报率见下方业绩口径）。基准为模拟基准指数。</p>
+        <div class="perf-grid" id="perfGrid"></div>
+      </div>
+
+      <div class="grid2">
+        <div class="card">
+          <h3>资产配置 <span class="hint">（按总资产，金额 + 占比）</span></h3>
+          <div class="donut-wrap"><canvas id="donut" width="220" height="220"></canvas>
+            <div class="donut-center"><div class="label">总资产</div><div id="donutTotal" class="num">$0.00</div></div>
+          </div>
+          <div id="allocList" class="alloc-list"></div>
+          <p class="hint">图例：▲ 上涨 / ▼ 下跌；颜色仅为辅助标识，请以符号和文字为准。</p>
+        </div>
+        <div class="card">
+          <h3>持仓 Top 5</h3>
+          <div id="topHoldings">加载中…</div>
+          <button class="btn" onclick="showView('invest')">查看全部持仓</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>最近动态</h3>
+        <div id="homeRecent">加载中…</div>
+      </div>
+    </section>
+
+    <!-- ============ 投资 ============ -->
+    <section id="view-invest" class="view" hidden>
+      <div class="card">
+        <div class="card-head"><h3>投资组合</h3><button class="btn" onclick="openRiskQuiz()">风险测评</button></div>
+        <p class="hint" id="riskLine">尚未完成风险测评（教育自测，非适当性评估）。</p>
+        <div class="hero-actions">
+          <button class="btn" onclick="openRebalance()">再平衡预览（5/25 规则）</button>
+          <button class="btn" onclick="openGoals()">我的目标</button>
+        </div>
+        <div id="goalsBox"></div>
+      </div>
+
+      <div class="card">
+        <h3>我的持仓 <span class="hint">— 成本按 FIFO 批次核算；平均成本仅为展示数字</span></h3>
+        <div class="table-wrap"><table class="table"><thead><tr><th>产品</th><th>数量</th><th>成本均价</th><th>现价</th><th>市值</th><th>未实现盈亏</th><th>占比</th><th>走势</th><th></th></tr></thead><tbody id="holdBody"></tbody></table></div>
+        <p class="hint" id="realizedLine"></p>
+        <div id="fdBox"></div>
+      </div>
+
+      <div class="card">
+        <h3>产品市场 <span class="hint">— 全部为模拟产品与模拟价格</span></h3>
+        <div class="filters">
+          <select id="prodType" onchange="renderProducts()"><option value="">全部类型</option><option value="STOCK">股票</option><option value="ETF">ETF</option><option value="FUND">基金</option><option value="GOLD">黄金</option><option value="FIXED_DEPOSIT">定存</option></select>
+          <select id="prodRisk" onchange="renderProducts()"><option value="">全部风险</option><option>R1</option><option>R2</option><option>R3</option><option>R4</option><option>R5</option></select>
+          <input id="prodQ" placeholder="搜索产品名" oninput="renderProducts()">
+        </div>
+        <div id="productGrid" class="prod-grid">加载中…</div>
+      </div>
+
+      <div class="card">
+        <h3>我的自选</h3>
+        <div id="watchBox">加载中…</div>
+        <h3>价格提醒 <span class="hint">— 仅应用内提醒，每目标一个提醒</span></h3>
+        <div class="row">
+          <select id="alertProduct"></select>
+          <select id="alertCond"><option value="ABOVE">价格高于</option><option value="BELOW">价格低于</option><option value="DAY_CHANGE">日涨跌幅超过</option></select>
+          <input id="alertThreshold" type="number" step="0.01" placeholder="价格 $ 或涨跌幅 %">
+          <select id="alertMode"><option value="ONCE">一次</option><option value="RECURRING">每次</option></select>
+          <button class="btn" onclick="addAlert()">添加提醒</button>
+        </div>
+        <div id="alertBox"></div>
+      </div>
+    </section>
+
+    <!-- ============ 钱包 ============ -->
+    <section id="view-wallet" class="view" hidden>
+      <div class="grid2">
+        <div class="card balance">
+          <div class="label">现金余额（虚拟）</div>
+          <div class="amount num" id="balanceAmount">$0.00</div>
+          <div class="sub">USD · 虚拟资金，不可提现</div>
+          <div class="actions">
+            <button class="btn primary" onclick="openModal('topupModal')">演示充值</button>
+            <button class="btn" onclick="openModal('transferModal')">转账</button>
+            <button class="btn" onclick="openModal('payModal')">付款 / 缴费</button>
+          </div>
+        </div>
+        <div class="card">
+          <h3>收支统计</h3>
+          <div id="statsBox">加载中…</div>
+          <h3>收益拆分 <span class="hint">— 分红 / 利息与价格收益分开</span></h3>
+          <div id="incomeBox">加载中…</div>
         </div>
       </div>
       <div class="card">
-        <h3>收支统计</h3>
-        <div id="statsBox">加载中…</div>
-        <canvas id="chart" width="320" height="140"></canvas>
-        <p class="hint">支出分类占比（演示图表）</p>
-      </div>
-    </div>
-
-    <div class="card">
-      <h3>账单 <span class="hint">— 可按类型 / 分类 / 关键词筛选</span></h3>
-      <div class="filters">
-        <select id="fType" onchange="loadTx()"><option value="">全部类型</option><option value="bonus">体验金</option><option value="topup">充值</option><option value="transfer_in">转入</option><option value="transfer_out">转出</option><option value="pay">付款</option></select>
-        <input id="fQ" placeholder="搜索商户 / 对方邮箱 / 备注" oninput="loadTx()">
-        <button class="btn" onclick="loadTx()">刷新</button>
-      </div>
-      <table class="table"><thead><tr><th>时间</th><th>类型</th><th>对方 / 商户</th><th>金额</th><th>余额</th></tr></thead><tbody id="txBody"></tbody></table>
-    </div>
-
-    <div class="card">
-      <h3>🔒 安全中心</h3>
-      <div class="sec-grid">
-        <div>
-          <h4>设置支付 PIN（首次）</h4>
-          <input id="pinNew" placeholder="6 位数字 PIN" maxlength="6">
-          <input id="pinPw" type="password" placeholder="登录密码（验证身份）">
-          <button class="btn" onclick="setPin()">设置 PIN</button>
+        <h3>钱包账单</h3>
+        <div class="filters">
+          <select id="fType" onchange="loadTx()"><option value="">全部类型</option><option value="bonus">体验金</option><option value="topup">充值</option><option value="transfer_in">转入</option><option value="transfer_out">转出</option><option value="pay">付款</option><option value="BUY">买入</option><option value="SELL">卖出</option><option value="DIVIDEND">分红</option><option value="INTEREST">利息</option></select>
+          <input id="fQ" placeholder="搜索商户 / 对方邮箱 / 备注" oninput="loadTx()">
+          <button class="btn" onclick="loadTx()">刷新</button>
         </div>
-        <div>
-          <h4>修改支付 PIN</h4>
-          <input id="pinOld" placeholder="原 PIN" maxlength="6">
-          <input id="pinNew2" placeholder="新 PIN（6 位）" maxlength="6">
-          <button class="btn" onclick="changePin()">修改 PIN</button>
-        </div>
-        <div>
-          <h4>修改登录密码</h4>
-          <input id="pwOld" type="password" placeholder="原密码">
-          <input id="pwNew" type="password" placeholder="新密码（至少 8 位）">
-          <button class="btn" onclick="changePw()">修改密码</button>
-        </div>
+        <div class="table-wrap"><table class="table"><thead><tr><th>时间</th><th>类型</th><th>对方 / 商户</th><th>金额</th><th>余额</th></tr></thead><tbody id="txBody"></tbody></table></div>
       </div>
-      <p id="secMsg" class="msg"></p>
-      <h4>安全审计日志（最近 50 条）</h4>
-      <div id="auditBox" class="audit"></div>
-    </div>
-  </section>
-</main>
+    </section>
 
-<!-- 弹窗 -->
+    <!-- ============ 流水 ============ -->
+    <section id="view-activity" class="view" hidden>
+      <div class="card">
+        <h3>订单记录 <span class="hint">— 每笔订单一个原子事务，幂等键防重复执行</span></h3>
+        <div class="table-wrap"><table class="table"><thead><tr><th>时间</th><th>产品</th><th>方向</th><th>数量</th><th>成交价</th><th>总额</th><th>已实现盈亏</th><th>状态</th></tr></thead><tbody id="orderBody"></tbody></table></div>
+      </div>
+      <div class="card">
+        <h3>资金流水 <span class="hint">— 追加-only 账本，每行含交易后余额，可逐行对账</span></h3>
+        <div class="filters">
+          <select id="aType" onchange="loadActivityTx()"><option value="">全部类型</option><option value="bonus">体验金</option><option value="topup">充值</option><option value="transfer_in">转入</option><option value="transfer_out">转出</option><option value="pay">付款</option><option value="BUY">买入</option><option value="SELL">卖出</option><option value="DIVIDEND">分红</option><option value="INTEREST">利息</option></select>
+          <button class="btn" onclick="loadActivityTx()">刷新</button>
+        </div>
+        <div class="table-wrap"><table class="table"><thead><tr><th>时间</th><th>类型</th><th>说明</th><th>金额</th><th>余额</th></tr></thead><tbody id="actTxBody"></tbody></table></div>
+      </div>
+    </section>
+
+    <!-- ============ 设置 ============ -->
+    <section id="view-settings" class="view" hidden>
+      <div class="card">
+        <h3>安全中心</h3>
+        <div class="sec-grid">
+          <div>
+            <h4>设置支付 PIN（首次）</h4>
+            <input id="pinNew" placeholder="6 位数字 PIN" maxlength="6">
+            <input id="pinPw" type="password" placeholder="登录密码（验证身份）">
+            <button class="btn" onclick="setPin()">设置 PIN</button>
+          </div>
+          <div>
+            <h4>修改支付 PIN</h4>
+            <input id="pinOld" placeholder="原 PIN" maxlength="6">
+            <input id="pinNew2" placeholder="新 PIN（6 位）" maxlength="6">
+            <button class="btn" onclick="changePin()">修改 PIN</button>
+          </div>
+          <div>
+            <h4>修改登录密码</h4>
+            <input id="pwOld" type="password" placeholder="原密码">
+            <input id="pwNew" type="password" placeholder="新密码（至少 8 位）">
+            <button class="btn" onclick="changePw()">修改密码</button>
+          </div>
+        </div>
+        <p id="secMsg" class="msg"></p>
+        <h4>安全审计日志（最近 50 条）</h4>
+        <div id="auditBox" class="audit"></div>
+      </div>
+      <div class="card">
+        <h3>数据与备份</h3>
+        <div class="row">
+          <button class="btn" onclick="exportData()">导出我的数据（JSON）</button>
+          <button class="btn" onclick="backupDb()">备份数据库（VACUUM INTO）</button>
+        </div>
+        <p class="msg" id="backupMsg"></p>
+        <pre id="exportBox" class="export" hidden></pre>
+        <h3>演示重置</h3>
+        <p class="hint">清空当前账号的全部演示历史并恢复 $50.00 虚拟体验金。需要输入登录密码确认。</p>
+        <div class="row"><input id="resetPw" type="password" placeholder="登录密码" style="max-width:220px"><button class="btn danger" onclick="resetDemo()">重置演示</button></div>
+        <p class="msg" id="resetMsg"></p>
+      </div>
+      <div class="card">
+        <h3>免责声明</h3>
+        <p>本应用仅为教学演示。所有余额、持仓、价格与盈亏均为模拟数据，不具有现金价值，不可提现、不可兑换。平台不接收、不持有真实资金，不进行真实证券买卖，不向任何市场发送真实订单。模拟价格与成交结果与真实市场可能存在差异，模拟成绩不代表真实收益。本应用不提供投资、税务或法律建议，不构成对任何产品的推荐。本应用不是券商、交易所、投顾或托管机构。投资有风险，入市需谨慎。</p>
+        <p class="hint">This app is an educational demo. All balances, holdings, prices, profits and losses are simulated and have no cash value. No real money is deposited, held or withdrawn, no real securities are bought or sold, and no order is executed on any market. Nothing here is financial, investment, tax or legal advice. We are not a broker, dealer, exchange, adviser or custodian.</p>
+      </div>
+    </section>
+  </main>
+</div>
+
+<nav class="bottombar" aria-label="移动导航">
+  <button class="nav-item active" data-view="home" onclick="showView('home')">首页</button>
+  <button class="nav-item" data-view="invest" onclick="showView('invest')">投资</button>
+  <button class="nav-item" data-view="wallet" onclick="showView('wallet')">钱包</button>
+  <button class="nav-item" data-view="activity" onclick="showView('activity')">流水</button>
+  <button class="nav-item" data-view="settings" onclick="showView('settings')">设置</button>
+</nav>
+
+<!-- 弹窗：充值 / 转账 / 付款 -->
 <div id="topupModal" class="modal" hidden><div class="modal-card"><h3>演示充值</h3><p class="hint">单次上限 $500，虚拟资金</p><input id="topupAmount" type="number" step="0.01" min="0.01" max="500" placeholder="金额（USD）"><div class="row"><button class="btn primary" onclick="doTopup()">确认充值</button><button class="btn" onclick="closeModal('topupModal')">取消</button></div><p class="msg" id="topupMsg"></p></div></div>
-<div id="transferModal" class="modal" hidden><div class="modal-card"><h3>按邮箱转账</h3><input id="trEmail" type="email" placeholder="收款方邮箱"><input id="trAmount" type="number" step="0.01" min="0.01" placeholder="金额（USD）"><input id="trPin" placeholder="6 位支付 PIN" maxlength="6"><input id="trNote" placeholder="备注（可选）"><div class="row"><button class="btn primary" onclick="doTransfer()">确认转账</button><button class="btn" onclick="closeModal('transferModal')">取消</button></div><p class="msg" id="trMsg"></p></div></div>
-<div id="payModal" class="modal" hidden><div class="modal-card"><h3>商户付款 / 缴费</h3><input id="payMerchant" placeholder="商户名称，例如 超市 / 水电费"><select id="payCategory"><option>购物</option><option>餐饮</option><option>交通</option><option>生活缴费</option><option>娱乐</option><option>其他</option></select><input id="payAmount" type="number" step="0.01" min="0.01" placeholder="金额（USD）"><input id="payPin" placeholder="6 位支付 PIN" maxlength="6"><div class="row"><button class="btn primary" onclick="doPay()">确认付款</button><button class="btn" onclick="closeModal('payModal')">取消</button></div><p class="msg" id="payMsg"></p></div></div>
+<div id="transferModal" class="modal" hidden><div class="modal-card"><h3>按邮箱转账</h3><input id="trEmail" type="email" placeholder="收款方邮箱"><input id="trAmount" type="number" step="0.01" min="0.01" placeholder="金额（USD）"><input id="trPin" placeholder="6 位支付 PIN" maxlength="6" inputmode="numeric"><input id="trNote" placeholder="备注（可选）"><div class="row"><button class="btn primary" onclick="doTransfer()">确认转账</button><button class="btn" onclick="closeModal('transferModal')">取消</button></div><p class="msg" id="trMsg"></p></div></div>
+<div id="payModal" class="modal" hidden><div class="modal-card"><h3>商户付款 / 缴费</h3><input id="payMerchant" placeholder="商户名称，例如 超市 / 水电费"><select id="payCategory"><option>购物</option><option>餐饮</option><option>交通</option><option>生活缴费</option><option>娱乐</option><option>其他</option></select><input id="payAmount" type="number" step="0.01" min="0.01" placeholder="金额（USD）"><input id="payPin" placeholder="6 位支付 PIN" maxlength="6" inputmode="numeric"><div class="row"><button class="btn primary" onclick="doPay()">确认付款</button><button class="btn" onclick="closeModal('payModal')">取消</button></div><p class="msg" id="payMsg"></p></div></div>
+
+<!-- 弹窗：产品详情与下单 -->
+<div id="productModal" class="modal" hidden><div class="modal-card wide"><h3 id="pmName">产品</h3><p class="hint" id="pmMeta"></p><canvas id="pmChart" width="560" height="180"></canvas><div id="pmInfo"></div>
+  <div class="row"><button class="btn primary" id="pmBuyBtn" onclick="setSide('BUY')">买入</button><button class="btn" id="pmSellBtn" onclick="setSide('SELL')">卖出</button></div>
+  <label>金额（USD）<input id="pmAmount" type="number" step="0.01" min="1" placeholder="例如 10.00"></label>
+  <label>或数量（份）<input id="pmQty" type="number" step="0.001" min="0.01" placeholder="例如 0.5"></label>
+  <p class="hint" id="pmQuote">输入金额或数量后点“预览订单”。</p>
+  <div class="row"><button class="btn primary" onclick="previewOrder()">预览订单</button><button class="btn" onclick="closeModal('productModal')">关闭</button></div>
+  <p class="msg" id="pmMsg"></p></div></div>
+
+<!-- 弹窗：订单复核 → PIN → 回单 -->
+<div id="reviewModal" class="modal" hidden><div class="modal-card"><h3>复核订单 <span class="badge">模拟成交</span></h3><div id="reviewBody"></div>
+  <p class="hint">模拟成交：按确认时模拟价即时成交，无真实交易。手续费 $0。本应用不构成投资建议。</p>
+  <label>支付 PIN（6 位）<input id="reviewPin" placeholder="6 位支付 PIN" maxlength="6" inputmode="numeric"></label>
+  <div class="row"><button class="btn primary" id="confirmOrderBtn" onclick="confirmOrder()">确认买入 / 卖出</button><button class="btn" onclick="closeModal('reviewModal')">返回修改</button></div>
+  <p class="msg" id="reviewMsg"></p></div></div>
+<div id="receiptModal" class="modal" hidden><div class="modal-card"><h3>成交回单 <span class="badge">模拟</span></h3><div id="receiptBody"></div><div class="row"><button class="btn primary" onclick="closeModal('receiptModal');refreshAll()">完成</button></div></div></div>
+
+<!-- 弹窗：风险测评 -->
+<div id="riskModal" class="modal" hidden><div class="modal-card wide"><h3>风险测评 <span class="hint">— 教育自测，非适当性评估</span></h3><div id="quizBox">加载中…</div><div class="row"><button class="btn primary" onclick="submitQuiz()">提交测评</button><button class="btn" onclick="closeModal('riskModal')">取消</button></div><div id="quizResult"></div></div></div>
+
+<!-- 弹窗：再平衡 -->
+<div id="rebalanceModal" class="modal" hidden><div class="modal-card wide"><h3>再平衡预览 <span class="hint">— 5/25 规则，仅为练习建议</span></h3><div id="rebalanceBody">加载中…</div><label>支付 PIN（6 位）<input id="rebPin" placeholder="执行全部建议交易时输入" maxlength="6" inputmode="numeric"></label><div class="row"><button class="btn primary" id="rebExecBtn" onclick="executeRebalance()">执行全部建议交易</button><button class="btn" onclick="closeModal('rebalanceModal')">关闭</button></div><p class="msg" id="rebMsg"></p></div></div>
+
+<!-- 弹窗：目标 -->
+<div id="goalsModal" class="modal" hidden><div class="modal-card"><h3>我的目标</h3><div id="goalsList"></div><label>目标名称<input id="goalName" placeholder="例如 买一台电脑"></label><label>目标金额（USD）<input id="goalAmount" type="number" step="0.01" min="1" placeholder="例如 500"></label><label>目标日期<input id="goalDate" type="date"></label><div class="row"><button class="btn primary" onclick="addGoal()">新建目标</button><button class="btn" onclick="closeModal('goalsModal')">关闭</button></div><p class="msg" id="goalMsg"></p></div></div>
 
 <script src="/app.js"></script>
 </body>
