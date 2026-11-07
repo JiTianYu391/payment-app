@@ -5,6 +5,9 @@
 // 模拟日推进：每小时推进 1 个模拟日（setInterval）；首次启动时预生成 30 天历史，
 // 因此图表 / TWR 上线即有数据。定存与货币基金不走 GBM，按固定利率计息。
 const crypto = require('crypto');
+const money = require('./money');
+// 价格路径用浮点对数收益率生成（这是行情模型，不是金额运算），结果取整为整数分；
+// 之后所有金额（市值、利息、分红）都按整数分 + money.mulDiv 计算。
 
 // ---------- 确定性随机数 ----------
 function mulberry32(seed) {
@@ -64,7 +67,18 @@ const PRODUCTS = [
   { id: 'SIM-FD-02', name: '90天定存', en: '90-Day Fixed Deposit', type: 'FIXED_DEPOSIT', risk: 'R1', riskLabel: '低风险', base_price_cents: 100, mu: 0.032, sigma: 0, dividend_yield: 0, price_seed: 902, tradeable: 1, rateBps: 320, termDays: 90, desc: '锁定 90 个模拟日，年化 3.20%，到期还本付息；提前支取按已存天数计息。' },
   { id: 'SIM-INDEX', name: '模拟基准指数', en: 'Simulated Benchmark', type: 'BENCHMARK', risk: 'R3', riskLabel: '中风险', base_price_cents: 10000, mu: 0.05, sigma: 0.15, dividend_yield: 0, price_seed: 999, tradeable: 0, desc: '仅用于业绩对比的模拟基准，不是真实指数，不可买卖。' },
 ];
+for (const p of PRODUCTS) p.dividend_bps = Math.round(p.dividend_yield * 10000); // 年化分红率（基点，整数）
 const PRODUCT_MAP = Object.fromEntries(PRODUCTS.map((p) => [p.id, p]));
+const MMF_RATE_BPS = 200; // 货币基金年化 2.00%
+
+// 定存已计利息（单利，按模拟日计）：本金 × 年化基点 × 天数 ÷ (10000 × 365)
+function accruedInterest(fd, day) {
+  const elapsed = Math.max(0, Math.min(day - fd.start_day, fd.maturity_day - fd.start_day));
+  return money.mulDiv(fd.principal_cents * fd.rate_bps, elapsed, 10000 * 365);
+}
+function holdingValue(quantityMilli, priceCents) {
+  return money.mulDiv(quantityMilli, priceCents, 1000);
+}
 const HISTORY_DAYS = 30;      // 首次启动预生成的历史天数
 const TICK_MS = 60 * 60 * 1000; // 每小时推进 1 个模拟日
 
@@ -123,16 +137,14 @@ function portfolioValue(db, userId, day) {
     const p = PRODUCT_MAP[h.product_id];
     if (!p) continue;
     const price = priceAt(p, d);
-    const value = Math.round((h.quantity_milli * price) / 1000);
+    const value = holdingValue(h.quantity_milli, price);
     invested += value;
     byProduct.push({ product_id: h.product_id, quantity_milli: h.quantity_milli, price_cents: price, value_cents: value });
   }
   // 定存按本金+已计利息计入投资市值
   const fds = db.prepare("SELECT * FROM fixed_deposits WHERE user_id = ? AND status = 'ACTIVE'").all(userId);
   for (const fd of fds) {
-    const cat = PRODUCT_MAP[fd.product_id];
-    const elapsed = Math.max(0, Math.min(d - fd.start_day, fd.maturity_day - fd.start_day));
-    const accrued = Math.round((fd.principal_cents * (fd.rate_bps / 10000) * elapsed) / 365);
+    const accrued = accruedInterest(fd, d);
     invested += fd.principal_cents + accrued;
     byProduct.push({ product_id: fd.product_id, quantity_milli: 0, price_cents: 100, value_cents: fd.principal_cents + accrued, fixed_deposit_id: fd.id });
   }
@@ -190,10 +202,10 @@ function tick(db, audit, withTransaction) {
         const holdings = db.prepare('SELECT product_id, quantity_milli FROM holdings WHERE user_id = ? AND quantity_milli > 0').all(u.id);
         for (const h of holdings) {
           const p = PRODUCT_MAP[h.product_id];
-          if (!p || !p.dividend_yield || p.id === 'SIM-FND-01') continue;
+          if (!p || !p.dividend_bps || p.id === 'SIM-FND-01') continue;
           const price = priceAt(p, day);
-          const perShare = Math.round((price * p.dividend_yield) / 4);
-          const amount = Math.round((perShare * h.quantity_milli) / 1000);
+          const perShare = money.mulDiv(price, p.dividend_bps, 40000); // 每份季度分红 = 价格 × 年化率 ÷ 4
+          const amount = holdingValue(h.quantity_milli, perShare);
           if (amount <= 0) continue;
           creditCash(db, u.id, amount, 'DIVIDEND', { product_id: p.id, description: `${p.name} 季度分红（模拟）` });
           db.prepare('INSERT INTO dividends (user_id, product_id, amount_cents, ex_date, paid_at) VALUES (?,?,?,?,?)')
@@ -203,15 +215,17 @@ function tick(db, audit, withTransaction) {
       // 货币基金按日计息
       const mmf = db.prepare('SELECT quantity_milli FROM holdings WHERE user_id = ? AND product_id = ?').get(u.id, 'SIM-FND-01');
       if (mmf && mmf.quantity_milli > 0) {
-        const value = Math.round((mmf.quantity_milli * 100) / 1000);
-        const interest = Math.round((value * 0.02) / 365);
+        const value = holdingValue(mmf.quantity_milli, 100);
+        const interest = money.mulDiv(value, MMF_RATE_BPS, 10000 * 365);
         if (interest > 0) creditCash(db, u.id, interest, 'INTEREST', { product_id: 'SIM-FND-01', description: '货币市场基金当日利息（模拟）' });
       }
       // 定存到期
       const fds = db.prepare("SELECT * FROM fixed_deposits WHERE user_id = ? AND status = 'ACTIVE' AND maturity_day <= ?").all(u.id, day);
       for (const fd of fds) {
-        const interest = Math.round((fd.principal_cents * (fd.rate_bps / 10000) * (fd.maturity_day - fd.start_day)) / 365);
-        creditCash(db, u.id, fd.principal_cents + interest, 'INTEREST', { product_id: fd.product_id, description: `定存到期：本金 $${(fd.principal_cents / 100).toFixed(2)} + 利息 $${(interest / 100).toFixed(2)}（模拟）` });
+        const interest = accruedInterest(fd, fd.maturity_day);
+        // 本金与利息分两笔入账：本金是投资往来（FD_REDEEM），利息才是投资收益（INTEREST），口径见 metrics.js
+        creditCash(db, u.id, fd.principal_cents, 'FD_REDEEM', { product_id: fd.product_id, category: '定存兑付', journalType: 'FD_CLOSE', description: '定存到期兑付本金 ' + money.formatCents(fd.principal_cents) + '（模拟）' });
+        if (interest > 0) creditCash(db, u.id, interest, 'INTEREST', { product_id: fd.product_id, description: '定存到期利息 ' + money.formatCents(interest) + '（模拟）' });
         db.prepare("UPDATE fixed_deposits SET status = 'MATURED' WHERE id = ?").run(fd.id);
       }
       // 提醒检查
@@ -240,17 +254,17 @@ function tick(db, audit, withTransaction) {
   });
 }
 
+// 入账统一走 wallet.applyCash（条件更新 + 流水 + 复式分录）
 function creditCash(db, userId, amountCents, type, opts = {}) {
-  const w = db.prepare('SELECT balance_cents FROM wallets WHERE user_id = ?').get(userId);
-  const bal = (w ? w.balance_cents : 0) + amountCents;
-  db.prepare('UPDATE wallets SET balance_cents = ?, updated_at = ? WHERE user_id = ?').run(bal, Date.now(), userId);
-  db.prepare('INSERT INTO transactions (user_id, type, amount_cents, balance_after_cents, category, description, product_id, created_at) VALUES (?,?,?,?,?,?,?,?)')
-    .run(userId, type, amountCents, bal, opts.category || '投资收益', opts.description || '', opts.product_id || null, Date.now());
-  return bal;
+  const { applyCash } = require('./wallet');
+  return applyCash(db, {
+    userId, delta: amountCents, type, journalType: opts.journalType, category: opts.category || '投资收益',
+    description: opts.description || '', product_id: opts.product_id || null,
+  }).balance;
 }
 
 module.exports = {
   PRODUCTS, PRODUCT_MAP, HISTORY_DAYS, TICK_MS,
   priceAt, priceHistory, latestPrices, currentDay, ensureHistory, seedProducts,
-  portfolioValue, snapshotUser, backfillCashHistory, tick, creditCash, dailyReturn,
+  portfolioValue, snapshotUser, backfillCashHistory, tick, creditCash, dailyReturn, accruedInterest, holdingValue,
 };
