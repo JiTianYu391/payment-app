@@ -134,3 +134,38 @@
 - Lucide — https://github.com/lucide-icons/lucide ；lucide-static — https://npmjs.com/package/lucide-static
 
 说明：Apple HIG 与 Material 3 的官方页面本轮没有直接检索到，相关数值（44pt 触控目标、抽屉拖拽条）来自二手整理，与业内通行做法一致。Wise、Monzo 的具体交易列表实现没有找到官方设计文档，结论来自其帮助中心说明和用户社区讨论。
+
+---
+
+## 8. 设置页（第四轮）
+
+| 观察 | 来源 | SpacePay 采用方式 |
+| --- | --- | --- |
+| 设置总览用列表布局，每项直接显示当前状态（如「已开启」），而不是一段说明 | Android 设置设计指南 | 每行右侧显示状态：PIN「已设置 / 未设置」、外观「跟随系统」、安全日志显示上次登录时间 |
+| 设置项少于约 15 个时放在一个列表页，分组呈现；更多时分组后进入详情页 | SAP Fiori for Android「Profile and settings」 | 一个列表页分五组：安全、偏好、数据、关于、危险操作；具体表单放在抽屉里 |
+| 按使用频率排序；删除账户、退出登录等危险操作放在最后 | Uxcel 设置最佳实践、uxdesign.cc《Designing a better Settings screen》 | 安全排第一组；危险操作与退出登录放在页面最后 |
+| iOS 设置使用分组列表（grouped / inset grouped），以页眉和间距分隔各组 | Apple HIG「Lists and tables」 | 圆角分组列表，组标题放在组外上方，行内 32px 图标块、标题、副标题、状态值和右箭头 |
+| 开关只用于立即生效的二选一；标签用正向表述，避免「隐藏……」这类否定说法；切换不需要再点确认 | 引用 NN/g 的设计系统文档（Mesa、Configura 等） | 「显示金额」用开关，立即生效并记住选择；外观有三个选项，所以用单选列表而不是开关 |
+| 密码默认遮罩，提供可来回切换的显示按钮，用「显示 / 隐藏」文字比只用图标更清楚，并有可访问名称 | SitePoint《Masking passwords》、Uxcel、Vaadin、Shopware 设计系统 | 每个密码框右侧有「显示 / 隐藏」文字按钮（带 aria-label）；新密码实时检查「至少 8 位」「与当前密码不同」 |
+| 危险操作集中到「Danger Zone」，用红色边框和危险按钮 | GitHub Primer「Danger pattern guidance」PR #113 | 「危险操作」分组使用红色描边；重置抽屉先提示后果，再要求输入密码，确认按钮为红色 |
+| Monzo 把安全设置放在「隐私与安全」分组，Revolut 设有独立的安全中心 | Monzo 帮助中心（Added Security）、Revolut 安全功能博客 | 安全相关项（PIN、密码、安全日志）作为第一组集中放置 |
+
+### 来源（第四轮）
+
+- Android Developers, Settings pattern — https://developer.android.com/design/ui/mobile/guides/patterns/settings
+- Android Open Source Project, Settings guidelines — https://source.android.com/docs/core/settings/settings-guidelines
+- SAP Fiori for Android, Profile and settings — https://www.sap.com/design-system/fiori-design-android/v26-4/patterns/profile-and-settings/usage
+- Uxcel, Settings best practices — https://uxcel.com/lessons/settings-best-practices-572
+- uxdesign.cc, Designing a better Settings screen for your app — https://uxdesign.cc/designing-a-better-settings-page-for-your-app-fcc32fe8c724
+- Apple HIG, Lists and tables — https://developer.apple.com/design/human-interface-guidelines/lists-and-tables
+- Sarun W., Inset grouped List in SwiftUI — https://sarunw.com/tips/inset-grouped-in-swiftui/
+- Mesa Design System, Toggle — https://mesadesignsystem.lanl.gov/components/toggle/overview
+- Configura Design System, Toggle switch — https://dev-docs.configura.com/design-system/toggle-switch
+- SitePoint, Masking passwords: help or hindrance — https://www.sitepoint.com/masking-passwords-help-or-hindrance/
+- Vaadin, Password field — https://origin.vaadin.com/docs/v23/components/password-field
+- Shopware Meteor, Password field — https://meteor.shopware.com/components/password-field
+- GitHub Primer, Danger pattern guidance（PR #113）— https://github-redirect.dependabot.com/primer/design/pull/113
+- Monzo, Added Security FAQs — https://monzo.com/help/Account%20Security/addedsecurityfaqs
+- Revolut, New security features — https://www.revolut.com/blog/post/new-revolut-security-features/
+
+说明：NN/g 关于开关的原文本轮没有直接打开，结论来自引用它的设计系统文档；Primer 的危险操作规范引用的是讨论中的 PR，正式文档可能有调整。
