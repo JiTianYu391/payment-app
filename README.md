@@ -15,7 +15,7 @@ SpacePay 是一个支付与资金管理系统的**演示环境**：钱包、转�
 npm install
 cp .env.example .env              # 至少修改 SESSION_SECRET；ADMIN_EMAILS 填你的邮箱
 npm start                         # http://localhost:3000
-npm test                          # 单元 + 集成测试（Node 内置 node:test）
+npm test                          # 单元 + 集成测试（Node 内置 node:test）；CI 见 .github/workflows/ci.yml
 ```
 
 需要 Node.js ≥ 22.5（使用内置 `node:sqlite`；不可用时自动降级到 JSON 文件存储）。无需编译原生模块，本次改造没有新增依赖。
@@ -25,8 +25,9 @@ npm test                          # 单元 + 集成测试（Node 内置 node:tes
 | 模块 | 内容 |
 | --- | --- |
 | 账户 | 邮箱验证码注册、密码登录（5 次失败锁定 15 分钟）、6 位支付 PIN |
-| 钱包 | 充值（演示）、转账、商户付款、提现申请；收支统计与统计周期 |
-| 交易记录 | 时间 / 类型 / 状态 / 金额区间 / 商户 / 关键字筛选，排序，分页，导出 CSV 与 Excel |
+| 首页 | 余额卡、转账 / 付款 / 充值 / 提现快捷操作、按天分组的最近交易、资产走势与配置 |
+| 交易 | 收支汇总与统计周期；全部流水（筛选、排序、分页、导出 CSV / Excel、交易详情）、付款、提现、投资订单 |
+| 手机端（PWA） | 可安装到主屏幕；底部标签栏、底部抽屉、按天分组的交易列表；浅色 / 深色 / 跟随系统 |
 | 投资（模拟） | 11 个模拟产品、买卖、定存、风险测评、再平衡、目标、价格提醒、TWR / MWR |
 | 运营后台 | 概览、全量交易、支付与退款、提现审核、用户冻结与角色、对账、操作日志 |
 
@@ -88,6 +89,6 @@ src/metrics.js         指标口径（唯一来源）
 src/logger.js          结构化日志；src/errors.js 统一错误；src/validate.js 输入校验
 src/resilience.js      超时 / 重试 / 降级；src/notifier.js 验证码投递
 src/db.js              SQLite / JSON 双后端、表结构与迁移
-public/                前端（index.html、styles.css 设计令牌、app.js、charts.js）与 brand/ 标识
+public/                前端（index.html、styles.css 设计令牌、app.js、charts.js、icons.js）、PWA（manifest.webmanifest、sw.js）与 brand/ 标识
 test/                  unit/ 单元测试，integration/ 集成测试
 ```

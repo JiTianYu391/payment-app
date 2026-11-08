@@ -103,3 +103,69 @@
 - Max Masnick, Alignment in tables — https://maxmasnick.nfshost.com/projects/datatips/guidelines/alignment-in-tables
 
 说明：本轮检索没有拿到 Nielsen Norman Group 关于表格的原文，表格对齐结论来自上面两篇设计指南，彼此一致。
+
+---
+
+## 7. 消费级钱包体验与 PWA（第三轮）
+
+用户反馈界面「像文档站、太冷」。按选定方向（参考 Wise / Monzo / Revolut 一类消费级钱包，做成 PWA，保持原生 JS）补充调研：
+
+| 观察 | 来源 | SpacePay 采用方式 |
+| --- | --- | --- |
+| 钱包类首页把余额放在最显眼处，大号字体，下面紧跟 3–4 个最常用的快捷操作；交易历史不能被挤到首屏以下 | Wise 帮助中心「账户新外观」、Pratt IxD 对 Wise iOS 的设计评析、多个金融应用首页改版案例 | 首页改为问候语 + 大号余额卡 + 转账 / 付款 / 充值 / 提现四个圆形快捷按钮；手机上「最近交易」紧跟余额卡 |
+| Monzo 用户认可的点：商户图标 + 名称、底部标签栏导航、按天浏览交易 | Monzo 社区讨论（交易流改版、App Evolution 反馈） | 交易动态按「今天 / 昨天 / 日期」分组，每笔显示类型图标、对方或商户、时间；收入用绿色，支出用正文色 |
+| 底部标签栏承载 3–5 个一级入口；可点区域不小于 44×44pt；内容避开刘海和底部横条等安全区 | Apple HIG 的二手整理（标签栏、触控目标、安全区） | 手机底部标签栏「首页 · 交易 · 转账 · 投资 · 我的」，中间为主操作；控件至少 44px；使用 `viewport-fit=cover` 与 `env(safe-area-inset-*)` |
+| 模态底部抽屉位于遮罩之上，可带拖拽条；不要从抽屉里再打开另一个抽屉 | Material 3 Bottom sheet（Android 文档镜像）、eBay Playbook | 手机上所有弹窗改为底部抽屉，带拖拽条，可下滑或点遮罩关闭；确认层使用独立层级 |
+| Web App Manifest：`display: standalone`、多尺寸图标、`purpose: maskable`；`theme_color` 与 `<meta name="theme-color">` 一致，深浅色在 meta 中分别设置 | web.dev「Add a web app manifest」 | 新增 `manifest.webmanifest`、192/512 PNG 与 maskable 图标、Apple 触控图标；service worker 只缓存静态资源，接口请求不缓存 |
+| Lucide 图标库采用 ISC 许可证，可商用；需保留版权声明 | Lucide GitHub、lucide-static（npm） | 只内联界面用到的 55 个图标（`public/icons.js`），文件头附完整许可证文本，不增加运行时依赖 |
+
+### 来源（第三轮）
+
+- Wise Help Centre, Your Wise account has a new look — https://wise.com/help/articles/645Ve1Ah1Psi0srHGfKYmm/your-wise-account-has-a-new-look
+- Pratt IxD, Design Critique: Wise (iOS App) — https://ixd.prattsi.org/2025/09/design-critique-wise-ios-app/
+- Jar Home Page Redesign（UX Planet）— https://uxplanet.org/jar-home-page-redesign-45fec5a8a8e9
+- Monzo Community, The prospect of a redesigned transaction feed — https://community.monzo.com/t/the-prospect-of-a-redesigned-transaction-feed/124538
+- Monzo Community, App Evolution feedback megathread — https://community.monzo.com/t/app-evolution-now-in-monzo-labs/141702/62
+- Flat Studio, Neobank UX patterns for daily banking — https://www.flatstudio.co/blog/neobank-ux-patterns-daily-banking
+- web.dev, Add a web app manifest — https://web.dev/articles/add-manifest
+- Material Components Android, Bottom sheet — https://super12138.github.io/material-components-android/components/BottomSheet.html
+- eBay Playbook, Bottom sheet — https://playbook.ebay.com/design-system/components/bottom-sheet
+- iOS design guidelines（Apple HIG 的二手整理）— https://smithery.ai/skills/ehmo/ios-design-guidelines
+- Lucide — https://github.com/lucide-icons/lucide ；lucide-static — https://npmjs.com/package/lucide-static
+
+说明：Apple HIG 与 Material 3 的官方页面本轮没有直接检索到，相关数值（44pt 触控目标、抽屉拖拽条）来自二手整理，与业内通行做法一致。Wise、Monzo 的具体交易列表实现没有找到官方设计文档，结论来自其帮助中心说明和用户社区讨论。
+
+---
+
+## 8. 设置页（第四轮）
+
+| 观察 | 来源 | SpacePay 采用方式 |
+| --- | --- | --- |
+| 设置总览用列表布局，每项直接显示当前状态（如「已开启」），而不是一段说明 | Android 设置设计指南 | 每行右侧显示状态：PIN「已设置 / 未设置」、外观「跟随系统」、安全日志显示上次登录时间 |
+| 设置项少于约 15 个时放在一个列表页，分组呈现；更多时分组后进入详情页 | SAP Fiori for Android「Profile and settings」 | 一个列表页分五组：安全、偏好、数据、关于、危险操作；具体表单放在抽屉里 |
+| 按使用频率排序；删除账户、退出登录等危险操作放在最后 | Uxcel 设置最佳实践、uxdesign.cc《Designing a better Settings screen》 | 安全排第一组；危险操作与退出登录放在页面最后 |
+| iOS 设置使用分组列表（grouped / inset grouped），以页眉和间距分隔各组 | Apple HIG「Lists and tables」 | 圆角分组列表，组标题放在组外上方，行内 32px 图标块、标题、副标题、状态值和右箭头 |
+| 开关只用于立即生效的二选一；标签用正向表述，避免「隐藏……」这类否定说法；切换不需要再点确认 | 引用 NN/g 的设计系统文档（Mesa、Configura 等） | 「显示金额」用开关，立即生效并记住选择；外观有三个选项，所以用单选列表而不是开关 |
+| 密码默认遮罩，提供可来回切换的显示按钮，用「显示 / 隐藏」文字比只用图标更清楚，并有可访问名称 | SitePoint《Masking passwords》、Uxcel、Vaadin、Shopware 设计系统 | 每个密码框右侧有「显示 / 隐藏」文字按钮（带 aria-label）；新密码实时检查「至少 8 位」「与当前密码不同」 |
+| 危险操作集中到「Danger Zone」，用红色边框和危险按钮 | GitHub Primer「Danger pattern guidance」PR #113 | 「危险操作」分组使用红色描边；重置抽屉先提示后果，再要求输入密码，确认按钮为红色 |
+| Monzo 把安全设置放在「隐私与安全」分组，Revolut 设有独立的安全中心 | Monzo 帮助中心（Added Security）、Revolut 安全功能博客 | 安全相关项（PIN、密码、安全日志）作为第一组集中放置 |
+
+### 来源（第四轮）
+
+- Android Developers, Settings pattern — https://developer.android.com/design/ui/mobile/guides/patterns/settings
+- Android Open Source Project, Settings guidelines — https://source.android.com/docs/core/settings/settings-guidelines
+- SAP Fiori for Android, Profile and settings — https://www.sap.com/design-system/fiori-design-android/v26-4/patterns/profile-and-settings/usage
+- Uxcel, Settings best practices — https://uxcel.com/lessons/settings-best-practices-572
+- uxdesign.cc, Designing a better Settings screen for your app — https://uxdesign.cc/designing-a-better-settings-page-for-your-app-fcc32fe8c724
+- Apple HIG, Lists and tables — https://developer.apple.com/design/human-interface-guidelines/lists-and-tables
+- Sarun W., Inset grouped List in SwiftUI — https://sarunw.com/tips/inset-grouped-in-swiftui/
+- Mesa Design System, Toggle — https://mesadesignsystem.lanl.gov/components/toggle/overview
+- Configura Design System, Toggle switch — https://dev-docs.configura.com/design-system/toggle-switch
+- SitePoint, Masking passwords: help or hindrance — https://www.sitepoint.com/masking-passwords-help-or-hindrance/
+- Vaadin, Password field — https://origin.vaadin.com/docs/v23/components/password-field
+- Shopware Meteor, Password field — https://meteor.shopware.com/components/password-field
+- GitHub Primer, Danger pattern guidance（PR #113）— https://github-redirect.dependabot.com/primer/design/pull/113
+- Monzo, Added Security FAQs — https://monzo.com/help/Account%20Security/addedsecurityfaqs
+- Revolut, New security features — https://www.revolut.com/blog/post/new-revolut-security-features/
+
+说明：NN/g 关于开关的原文本轮没有直接打开，结论来自引用它的设计系统文档；Primer 的危险操作规范引用的是讨论中的 PR，正式文档可能有调整。

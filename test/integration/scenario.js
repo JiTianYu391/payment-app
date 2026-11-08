@@ -340,6 +340,19 @@ module.exports = function scenario(env) {
     await reconcileOk();
   });
 
+  test('PWA：清单、service worker 与应用图标可访问', async () => {
+    const m = await fetch(t.base + '/manifest.webmanifest');
+    assert.equal(m.status, 200);
+    assert.match(m.headers.get('content-type'), /application\/manifest\+json/);
+    const manifest = await m.json();
+    assert.equal(manifest.display, 'standalone');
+    assert.ok(manifest.icons.some((i) => i.purpose === 'maskable'));
+    for (const icon of manifest.icons) assert.equal((await fetch(t.base + icon.src)).status, 200, icon.src);
+    const sw = await fetch(t.base + '/sw.js');
+    assert.equal(sw.status, 200);
+    assert.match(await sw.text(), /\/api\//); // 接口请求不进缓存
+  });
+
   test('健康检查与未知接口', async () => {
     const h = await t.call('GET', '/api/health');
     assert.equal(h.body.service, 'SpacePay');
