@@ -1,6 +1,8 @@
-// SpacePay 前端。金额一律以整数分从服务端取得，只在显示时格式化（千分位 + 货币符号）。
-// 资金类请求带 Idempotency-Key；关键操作由服务端返回 428 + 摘要，经确认弹窗二次提交。
-// 表格统一单行显示（长文本截断并在 title 中给出全文），空表格显示说明与下一步操作。
+// SpacePay 前端（原生 JS，无构建步骤）。
+// - 金额一律以整数分从服务端取得，只在显示时格式化（千分位 + 货币符号）。
+// - 资金类请求带 Idempotency-Key；关键操作由服务端返回 428 + 摘要，经确认弹窗二次提交。
+// - 用户端：余额卡 + 快捷操作 + 按天分组的交易动态；手机端底部标签栏、底部抽屉、表格转卡片。
+// - PWA：注册 service worker（只缓存静态资源，接口请求不缓存），支持安装到主屏幕。
 'use strict';
 
 // ---------- 状态 ----------
@@ -15,13 +17,16 @@ let currentView = 'home';
 let curProduct = null;
 let curSide = 'BUY';
 let curPreview = null;
+let walletBalance = null;
 const formKeys = {}; // 每个表单一次提交对应一个幂等键；成功后换新，失败重试沿用
+const txCache = new Map(); // 交易 id -> 行数据（详情抽屉用）
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s === null || s === undefined ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const newKey = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2));
 const keyFor = (form) => (formKeys[form] = formKeys[form] || newKey());
 const resetKey = (form) => { delete formKeys[form]; };
+const isMobile = () => window.matchMedia('(max-width: 900px)').matches;
 
 // ---------- 格式化 ----------
 function cents(c, opts = {}) {
@@ -50,16 +55,25 @@ function signedHtml(v, text) {
   return `<span class="${cls}">${arrow}${text}</span>`;
 }
 const qtyFmt = (milli) => (milli / 1000).toFixed(3);
+const pad2 = (n) => String(n).padStart(2, '0');
 function fmtTime(ts) {
   const d = new Date(ts);
-  const p = (n) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
 }
-// 单行截断单元格：全文放进 title，悬停可见
+const fmtClock = (ts) => { const d = new Date(ts); return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
+function dayLabel(ts) {
+  const d = new Date(ts);
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const that = new Date(d); that.setHours(0, 0, 0, 0);
+  const diff = Math.round((today - that) / 86400000);
+  if (diff === 0) return '今天';
+  if (diff === 1) return '昨天';
+  const wd = '日一二三四五六'[d.getDay()];
+  return (d.getFullYear() === today.getFullYear() ? '' : d.getFullYear() + ' 年 ') + `${d.getMonth() + 1} 月 ${d.getDate()} 日 · 周${wd}`;
+}
 const tdTrunc = (text, cls = '') => `<td class="trunc ${cls}" title="${esc(text)}">${esc(text)}</td>`;
-// 空状态行：说明 + 可选的下一步操作
-function emptyRow(cols, title, desc, action) {
-  return `<tr><td colspan="${cols}" class="empty-cell"><div class="empty-state" style="padding:var(--space-6) var(--space-5)"><h3>${esc(title)}</h3>${desc ? `<p>${esc(desc)}</p>` : ''}${action || ''}</div></td></tr>`;
+function emptyRow(cols, title, desc, action, iconName) {
+  return `<tr><td colspan="${cols}" class="empty-cell"><div class="empty-state" style="padding:var(--space-6) var(--space-5)">${iconName ? `<span class="empty-icon">${icon(iconName)}</span>` : ''}<h3>${esc(title)}</h3>${desc ? `<p>${esc(desc)}</p>` : ''}${action || ''}</div></td></tr>`;
 }
 
 const TYPE_LABEL = {
@@ -79,11 +93,58 @@ const AUDIT_LABEL = {
   change_password: '修改密码', pin_failed: 'PIN 验证失败', transfer: '转账', pay: '付款', topup: '充值', withdrawal: '申请提现',
   order: '投资下单', fd_buy: '定存申购', rebalance: '再平衡', demo_reset: '重置演示数据', alert_fired: '价格提醒触发', export: '导出交易',
 };
+const CATEGORY_ICON = { 购物: 'shopping-bag', 餐饮: 'coffee', 交通: 'bus', 生活缴费: 'zap', 娱乐: 'clapperboard' };
+const TYPE_ICON = {
+  bonus: 'gift', topup: 'plus', transfer_in: 'arrow-down-left', transfer_out: 'arrow-up-right', refund: 'undo-2',
+  withdrawal: 'landmark', withdrawal_reversal: 'rotate-ccw', BUY: 'trending-up', SELL: 'banknote', FD_REDEEM: 'piggy-bank',
+  DIVIDEND: 'coins', INTEREST: 'percent', demo_reset: 'rotate-ccw',
+};
+function txIcon(t) { return t.type === 'pay' ? (CATEGORY_ICON[t.category] || 'credit-card') : (TYPE_ICON[t.type] || 'receipt'); }
+// 交易标题：对方或商户优先，其次说明
+function txTitle(t) {
+  if (t.merchant) return t.merchant;
+  if (t.counterparty_email) return t.counterparty_email.split('@')[0]; // 列表里只显示用户名，完整邮箱在详情中
+  if (['BUY', 'SELL', 'DIVIDEND', 'INTEREST', 'FD_REDEEM'].includes(t.type)) return (t.description || '').replace(/^模拟(买入|卖出)\s*/, '').split(/\s|，/)[0] || TYPE_LABEL[t.type];
+  return TYPE_LABEL[t.type] || t.type;
+}
 function badge(map, key) {
   const [label, cls] = map[key] || [key || '—', ''];
   return `<span class="badge ${cls}">${esc(label)}</span>`;
 }
 const can = (perm) => !!(me && me.permissions && me.permissions.includes(perm));
+
+// ---------- 交易动态（按天分组） ----------
+function feedHtml(items, opts = {}) {
+  if (!items.length) return `<li class="feed-empty">${esc(opts.empty || '暂无交易')}</li>`;
+  let html = '';
+  let lastDay = '';
+  for (const t of items) {
+    txCache.set(t.id, t);
+    const day = dayLabel(t.created_at);
+    if (day !== lastDay) { html += `<li class="feed-day"><span>${esc(day)}</span></li>`; lastDay = day; }
+    const inflow = t.amount_cents > 0;
+    const status = t.status && t.status !== 'SUCCEEDED' ? badge(STATUS, t.status) : '';
+    html += `<li><button class="feed-item" onclick="openTxDetail(${t.id})">
+      <span class="feed-avatar ${inflow ? 'in' : ''}">${icon(txIcon(t))}</span>
+      <span class="feed-main"><span class="feed-title" style="display:block">${esc(txTitle(t))}</span><span class="feed-sub">${esc(TYPE_LABEL[t.type] || t.type)} · ${fmtClock(t.created_at)} ${status}</span></span>
+      <span class="feed-amt ${inflow ? 'in' : ''}">${money(t.amount_cents, { signed: true })}${opts.balance ? `<small>余额 ${money(t.balance_after_cents)}</small>` : ''}</span>
+    </button></li>`;
+  }
+  return html;
+}
+function openTxDetail(id) {
+  const t = txCache.get(id);
+  if (!t) return;
+  const inflow = t.amount_cents > 0;
+  $('txDetailHead').innerHTML = `<span class="feed-avatar ${inflow ? 'in' : ''}">${icon(txIcon(t), 24)}</span>
+    <div class="amt ${inflow ? 'in' : ''}">${money(t.amount_cents, { signed: true })}</div><p>${esc(txTitle(t))}</p>`;
+  const dd = (k, v) => `<dt>${k}</dt><dd>${v}</dd>`;
+  $('txDetailBody').innerHTML = dd('状态', badge(STATUS, t.status || 'SUCCEEDED')) + dd('类型', esc(TYPE_LABEL[t.type] || t.type))
+    + (t.merchant ? dd('商户', esc(t.merchant)) : '') + (t.counterparty_email ? dd('对方', esc(t.counterparty_email)) : '')
+    + (t.category ? dd('分类', esc(t.category)) : '') + (t.description ? dd('说明', esc(t.description)) : '')
+    + dd('交易后余额', money(t.balance_after_cents)) + dd('时间', fmtTime(t.created_at)) + dd('交易编号', `<span class="mono">#${t.id}</span>`);
+  openSheet('txDetailModal');
+}
 
 // ---------- 请求 ----------
 // GET 遇到网络错误或 502/503/504 时自动重试 2 次（指数退避）；写请求不自动重试，由幂等键保证手动重试安全。
@@ -106,7 +167,7 @@ async function api(path, opts = {}) {
     } catch (e) {
       clearTimeout(timer);
       if (attempt < retries) { await new Promise((ok) => setTimeout(ok, 300 * 2 ** attempt)); continue; }
-      return { status: 0, ok: false, error: e.name === 'AbortError' ? '请求超时，请检查网络后重试' : '网络连接失败，请稍后重试' };
+      return { status: 0, ok: false, error: !navigator.onLine ? '网络已断开，请联网后重试' : e.name === 'AbortError' ? '请求超时，请检查网络后重试' : '网络连接失败，请稍后重试' };
     }
   }
 }
@@ -123,7 +184,7 @@ async function submitConfirmed(path, body, idemKey) {
     $('confirmBody').innerHTML = ((r.summary && r.summary.lines) || []).map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('');
     msg('confirmMsg', '');
     $('confirmBtn').disabled = false;
-    openModal('confirmModal');
+    openSheet('confirmModal');
   });
 }
 async function acceptConfirm() {
@@ -142,44 +203,123 @@ function cancelConfirm() {
   if (pendingConfirm) { pendingConfirm.resolve({ ok: false, cancelled: true }); pendingConfirm = null; }
 }
 
-// ---------- 基础交互 ----------
+// ---------- 弹窗 / 底部抽屉 ----------
 function msg(id, text, isErr) { const e = $(id); if (!e) return; e.textContent = text || ''; e.className = 'msg' + (isErr ? ' err' : ''); }
-function openModal(id) { $(id).hidden = false; const f = $(id).querySelector('input:not([type=hidden]),select,textarea'); if (f) setTimeout(() => f.focus(), 0); }
-function closeModal(id) { $(id).hidden = true; }
+function openSheet(id) {
+  const m = $(id);
+  m.hidden = false;
+  document.body.style.overflow = 'hidden';
+  // 手机上不自动聚焦，避免键盘立刻弹出遮挡内容；桌面聚焦第一个输入框
+  if (!isMobile()) { const f = m.querySelector('input:not([type=hidden]),select,textarea'); if (f) setTimeout(() => f.focus(), 0); }
+}
+const openModal = openSheet;
+function closeModal(id) {
+  $(id).hidden = true;
+  if (![...document.querySelectorAll('.modal')].some((x) => !x.hidden)) document.body.style.overflow = '';
+}
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
   const open = [...document.querySelectorAll('.modal')].filter((m) => !m.hidden).pop();
   if (open) { if (open.id === 'confirmModal') cancelConfirm(); else closeModal(open.id); }
 });
+// 点遮罩关闭；拖动抽屉顶部下滑关闭
+document.addEventListener('click', (e) => {
+  if (e.target.classList && e.target.classList.contains('modal')) {
+    if (e.target.id === 'confirmModal') cancelConfirm(); else closeModal(e.target.id);
+  }
+});
+(function enableSwipeToClose() {
+  let startY = 0, dy = 0, card = null, modal = null;
+  document.addEventListener('touchstart', (e) => {
+    const h = e.target.closest && e.target.closest('.sheet-handle, .modal-head');
+    if (!h || !isMobile()) return;
+    card = h.closest('.modal-card'); modal = h.closest('.modal');
+    if (card.scrollTop > 0) { card = null; return; }
+    startY = e.touches[0].clientY; dy = 0; card.style.transition = 'none';
+  }, { passive: true });
+  document.addEventListener('touchmove', (e) => {
+    if (!card) return;
+    dy = Math.max(0, e.touches[0].clientY - startY);
+    card.style.transform = `translateY(${dy}px)`;
+  }, { passive: true });
+  document.addEventListener('touchend', () => {
+    if (!card) return;
+    card.style.transition = 'transform .2s';
+    if (dy > 90) { const id = modal.id; card.style.transform = 'translateY(100%)'; setTimeout(() => { card.style.transform = ''; card.style.transition = ''; if (id === 'confirmModal') cancelConfirm(); else closeModal(id); }, 180); }
+    else card.style.transform = '';
+    card = null;
+  });
+})();
+// 金额输入框随内容自动加宽（不支持 field-sizing 的浏览器）
+document.addEventListener('input', (e) => {
+  if (e.target.closest && e.target.closest('.amount-field')) e.target.style.width = Math.max(3, e.target.value.length || 4) + 1 + 'ch';
+});
+// 快捷金额
+document.addEventListener('click', (e) => {
+  const b = e.target.closest && e.target.closest('.chip-btn[data-v]');
+  if (!b) return;
+  const input = $(b.parentElement.dataset.for);
+  if (input) { input.value = b.dataset.v + '.00'; input.dispatchEvent(new Event('input', { bubbles: true })); input.focus({ preventScroll: true }); }
+});
+// 窄屏下表格转为卡片：自动按表头给每个单元格加标签
+function labelTables(root) {
+  (root || document).querySelectorAll('table.data.stack').forEach((table) => {
+    const heads = [...table.querySelectorAll('thead th')].map((th) => th.textContent.trim());
+    table.querySelectorAll('tbody tr').forEach((tr) => {
+      [...tr.children].forEach((td, i) => { if (!td.hasAttribute('data-label')) td.setAttribute('data-label', heads[i] || ''); });
+    });
+  });
+}
+new MutationObserver((muts) => { for (const m of muts) if (m.target.closest && m.target.closest('table.data.stack')) { labelTables(m.target.closest('table').parentElement); } })
+  .observe(document.body, { childList: true, subtree: true });
+
+let toastTimer;
+function toast(text, isErr) {
+  let t = $('toast');
+  if (!t) { t = document.createElement('div'); t.id = 'toast'; t.setAttribute('role', 'status'); document.body.appendChild(t); }
+  t.className = 'toast' + (isErr ? ' err' : '');
+  t.innerHTML = icon(isErr ? 'circle-alert' : 'circle-check', 18) + `<span>${esc(text)}</span>`;
+  t.hidden = false;
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.hidden = true; }, 3200);
+}
+
+// ---------- 导航 ----------
 function showTab(t) {
   $('tabLogin').classList.toggle('active', t === 'login'); $('tabRegister').classList.toggle('active', t === 'register');
   $('loginPane').hidden = t !== 'login'; $('registerPane').hidden = t !== 'register'; msg('authMsg', '');
-  $('authTitle').textContent = t === 'login' ? '登录 SpacePay' : '注册 SpacePay 账户';
-  $('authLead').textContent = t === 'login' ? '使用注册邮箱和密码登录' : '用邮箱验证码完成注册';
+  $('authTitle').textContent = t === 'login' ? '欢迎回来' : '创建 SpacePay 账户';
+  $('authLead').textContent = t === 'login' ? '登录 SpacePay，管理你的钱包与投资' : '用邮箱验证码注册，几秒完成';
 }
 function logoutLocal(text) {
   token = ''; me = null;
   try { localStorage.removeItem('spacepay_token'); localStorage.removeItem('pay_token'); } catch (_) { /* ignore */ }
-  $('appShell').hidden = true; $('bottomNav').hidden = true; $('authView').hidden = false; $('topMeta').hidden = true;
+  $('appShell').hidden = true; $('tabbar').hidden = true; $('authView').hidden = false; $('topMeta').hidden = true;
   if (text) msg('authMsg', text, true);
 }
 function enterApp() {
-  $('authView').hidden = true; $('appShell').hidden = false; $('bottomNav').hidden = false; $('topMeta').hidden = false;
-  $('avatar').textContent = (me.nickname || me.email).trim().slice(0, 1).toUpperCase();
+  $('authView').hidden = true; $('appShell').hidden = false; $('tabbar').hidden = false; $('topMeta').hidden = false;
+  const initial = (me.nickname || me.email).trim().slice(0, 1).toUpperCase();
+  $('avatar').textContent = initial; $('profileAvatar').textContent = initial;
   $('topName').textContent = me.nickname;
-  $('topEmail').textContent = me.email + (me.role && me.role !== 'customer' ? ' · ' + (ROLE_LABEL[me.role] || me.role) : '');
+  const roleText = me.role && me.role !== 'customer' ? ROLE_LABEL[me.role] || me.role : '';
+  $('topEmail').textContent = me.email + (roleText ? ' · ' + roleText : '');
+  $('profileName').textContent = me.nickname;
+  $('profileEmail').textContent = me.email + (roleText ? ' · ' + roleText : '');
   const staff = can('console.read');
   $('consoleNav').hidden = !staff;
   $('roleLabel').textContent = ROLE_LABEL[me.role] || me.role;
-  api('/api/health').then((h) => { if (h.invest && h.invest.simulated_day) { simDay = h.invest.simulated_day; $('simDay').textContent = '模拟日 day-' + simDay; } });
-  const v = (location.hash || '').slice(1);
+  api('/api/health').then((h) => { if (h.invest && h.invest.simulated_day) { simDay = h.invest.simulated_day; $('simDay').innerHTML = icon('clock', 14) + '模拟日 day-' + simDay; } });
+  let v = (location.hash || '').slice(1);
+  if (v === 'wallet') v = 'activity'; // 旧链接兼容：钱包已并入交易页
+  if (v === 'transfer') { showView('home'); return openTransfer(); }
   showView(v && $('view-' + v) && (!v.startsWith('c-') || staff) ? v : 'home');
 }
-
 function showView(v) {
+  if (v === 'wallet') v = 'activity';
   currentView = v;
-  document.querySelectorAll('.nav-item').forEach((b) => b.classList.toggle('active', b.dataset.view === v));
+  document.querySelectorAll('.nav-item, .tab-item').forEach((b) => b.classList.toggle('active', b.dataset.view === v));
   document.querySelectorAll('.view').forEach((s) => (s.hidden = s.id !== 'view-' + v));
+  $('main').classList.toggle('wide', v.startsWith('c-'));
   if (location.hash.slice(1) !== v) history.replaceState(null, '', '#' + v);
   window.scrollTo(0, 0);
   refreshCurrent();
@@ -187,13 +327,19 @@ function showView(v) {
 function refreshCurrent() {
   if (!me) return;
   const loaders = {
-    home: loadHome, wallet: loadWallet, activity: () => { loadTxTable('me'); loadOrders(); }, invest: loadInvest, settings: loadSettings,
+    home: loadHome, activity: loadActivity, invest: loadInvest, settings: loadSettings,
     'c-overview': loadAdminOverview, 'c-tx': () => loadTxTable('admin'), 'c-payments': () => loadAdminPayments(1),
     'c-withdrawals': loadAdminWithdrawals, 'c-users': () => loadAdminUsers(1), 'c-recon': () => {}, 'c-logs': () => loadOpLogs(1),
   };
   (loaders[currentView] || (() => {}))();
 }
-function togglePrivacy() { privacy = !privacy; $('privacyBtn').textContent = privacy ? '显示金额' : '隐藏金额'; refreshCurrent(); }
+function togglePrivacy() {
+  privacy = !privacy;
+  const b = $('privacyBtn');
+  b.innerHTML = icon(privacy ? 'eye-off' : 'eye');
+  b.setAttribute('aria-label', privacy ? '显示金额' : '隐藏金额');
+  refreshCurrent();
+}
 
 // ---------- 认证 ----------
 async function requestCode() {
@@ -224,27 +370,33 @@ async function doLogin() {
   try { localStorage.setItem('spacepay_token', token); } catch (_) { /* ignore */ }
   me = j.user; $('loginPassword').value = '';
   enterApp();
-  if (!me.has_pin) setTimeout(() => showView('settings'), 0);
+  if (!me.has_pin) setTimeout(() => { showView('settings'); toast('先设置 6 位支付 PIN，就可以转账和付款了'); }, 0);
 }
 async function doLogout() { await api('/api/auth/logout', { method: 'POST' }); logoutLocal(); }
 
-// ---------- 总览 ----------
+// ---------- 首页 ----------
+function greeting() {
+  const h = new Date().getHours();
+  return h < 6 ? '夜深了' : h < 11 ? '早上好' : h < 13 ? '中午好' : h < 18 ? '下午好' : '晚上好';
+}
 async function loadHome() {
+  $('greet').textContent = `${greeting()}，${me.nickname}`;
   const [pf, perf, tx] = await Promise.all([api('/api/portfolio'), api('/api/performance?range=' + currentRange), api('/api/transactions?page_size=6')]);
   if (!pf.ok) return;
   simDay = pf.simulated_day;
-  $('simDay').textContent = '模拟日 day-' + simDay;
-  $('homeAsOf').textContent = `数据截至模拟日 day-${simDay}，模拟市场每小时推进 1 个模拟日`;
+  $('homeAsOf').textContent = `数据截至模拟日 day-${simDay}`;
   $('kTotal').textContent = money(pf.total_cents);
   $('kCash').textContent = money(pf.cash_cents);
   $('kInvested').textContent = money(pf.invested_cents);
-  $('kInvestedNote').textContent = `未实现盈亏 ${privacy ? '••••' : cents(pf.unrealized_pl_cents, { signed: true })}`;
-  $('kToday').innerHTML = privacy ? '••••' : signedHtml(pf.today_pl_cents, cents(Math.abs(pf.today_pl_cents)));
+  const tp = pf.today_pl_cents;
+  $('kToday').className = 'pill ' + (tp > 0 ? 'up' : tp < 0 ? 'down' : '');
+  $('kToday').innerHTML = (tp ? icon(tp > 0 ? 'trending-up' : 'trending-down', 14) : '') + `今日 ${privacy ? '••••' : cents(tp, { signed: true })}`;
+  walletBalance = pf.cash_cents;
   Charts.hbar($('allocChart'), {
     items: pf.allocation.map((a) => ({ label: a.class_zh, value: a.amount_cents, note: a.pct_of_total.toFixed(1) + '%' })),
     format: (v) => (privacy ? '••••' : cents(Math.round(v))), axisFormat: (v, top) => (privacy ? '' : axisMoney(v, top)),
   });
-  $('allocSub').textContent = `按资产类别，金额与占总资产比例；截至模拟日 day-${simDay}`;
+  $('allocSub').textContent = `按资产类别，金额与占比；截至 day-${simDay}`;
   if (perf.ok) {
     const s = perf.series;
     const base = s.length ? s[0].total_cents : 0;
@@ -252,21 +404,18 @@ async function loadHome() {
       xLabels: s.map((p) => 'day-' + p.day),
       series: [
         { name: '总资产', cls: 'line-1', values: s.map((p) => p.total_cents) },
-        { name: '模拟基准指数', cls: 'line-2', values: perf.benchmark.map((b) => Math.round((base * b.indexed) / 100)) },
+        { name: '基准指数', cls: 'line-2', values: perf.benchmark.map((b) => Math.round((base * b.indexed) / 100)) },
       ],
       format: (v) => (privacy ? '••••' : cents(Math.round(v))), axisFormat: (v, top) => (privacy ? '' : axisMoney(v, top)),
-      emptyText: '历史不足：新账户从今天开始积累数据', height: 240,
+      emptyText: '历史不足：新账户从今天开始积累数据', height: isMobile() ? 200 : 240,
     });
     $('perfPeriod').textContent = '统计周期：' + (perf.period ? perf.period.label : '—');
     const ret = (v) => (v === null || v === undefined ? '<span class="muted">历史不足</span>' : signedHtml(v, pct(v)));
     const metric = (label, value) => `<div class="metric"><div class="label">${label}</div><div class="value">${value}</div></div>`;
-    $('perfGrid').innerHTML = metric('时间加权回报 TWR', ret(perf.twr_pct)) + metric('货币加权回报 MWR', ret(perf.mwr_pct))
-      + metric('简单回报', ret(perf.simple_return_pct)) + metric('分红收入', money(perf.income.dividends_cents)) + metric('利息收入', money(perf.income.interest_cents));
+    $('perfGrid').innerHTML = metric('时间加权 TWR', ret(perf.twr_pct)) + metric('货币加权 MWR', ret(perf.mwr_pct))
+      + metric('简单回报', ret(perf.simple_return_pct)) + metric('分红', money(perf.income.dividends_cents)) + metric('利息', money(perf.income.interest_cents));
   }
-  if (tx.ok) {
-    $('homeRecent').innerHTML = tx.items.map((t) => `<tr><td>${fmtTime(t.created_at).slice(5)}</td><td>${esc(TYPE_LABEL[t.type] || t.type)}${t.status && t.status !== 'SUCCEEDED' ? ' ' + badge(STATUS, t.status) : ''}</td>${tdTrunc(t.merchant || t.counterparty_email || t.category || '—')}<td class="num">${money(t.amount_cents, { signed: true })}</td></tr>`).join('')
-      || emptyRow(4, '暂无交易', '充值、转账或付款后会显示在这里。');
-  }
+  if (tx.ok) $('homeFeed').innerHTML = feedHtml(tx.items, { empty: '还没有交易。试试充值或转账吧。' });
 }
 function setRange(r) {
   currentRange = r;
@@ -274,15 +423,19 @@ function setRange(r) {
   loadHome();
 }
 
-// ---------- 钱包 ----------
-function walletTab(t) {
-  document.querySelectorAll('#view-wallet .tab').forEach((b) => b.classList.toggle('active', b.dataset.tab === t));
-  $('walletPay').hidden = t !== 'pay';
-  $('walletWd').hidden = t !== 'wd';
+// ---------- 交易页（流水 + 付款 + 提现 + 订单） ----------
+let actTab = 'all';
+function activityTab(t) {
+  actTab = t;
+  document.querySelectorAll('#actTabs .tab').forEach((b) => b.classList.toggle('active', b.dataset.tab === t));
+  for (const k of ['all', 'pay', 'wd', 'orders']) $('pane-' + k).hidden = k !== t;
+  if (t === 'orders') loadOrders();
 }
-async function loadWallet() {
+async function loadActivity() {
+  loadTxTable('me');
+  if (actTab === 'orders') loadOrders();
   const [w, st, pays, wds] = await Promise.all([api('/api/wallet'), api('/api/stats'), api('/api/payments'), api('/api/withdrawals')]);
-  if (w.ok) $('wBalance').textContent = money(w.balance_cents);
+  if (w.ok) { walletBalance = w.balance_cents; $('wBalance').textContent = money(w.balance_cents); }
   if (st.ok) {
     $('wIn').textContent = money(st.income_cents);
     $('wOut').textContent = money(st.expense_cents);
@@ -293,12 +446,12 @@ async function loadWallet() {
   if (pays.ok) {
     $('payCount').textContent = pays.items.length ? ' ' + pays.items.length : '';
     $('myPayments').innerHTML = pays.items.map((p) => `<tr><td>${fmtTime(p.created_at)}</td>${tdTrunc(p.merchant)}<td>${esc(p.category || '—')}</td><td>${badge(STATUS, p.status)}</td><td class="num">${money(p.amount_cents)}</td><td class="num">${p.refunded_cents ? money(p.refunded_cents) : '—'}</td></tr>`).join('')
-      || emptyRow(6, '暂无付款记录', '向商户付款后，可以在这里查看付款与退款状态。', '<button class="btn sm" onclick="openModal(\'payModal\')">付款</button>');
+      || emptyRow(6, '还没有付款记录', '向商户付款后，可以在这里查看付款与退款状态。', `<button class="btn sm" onclick="openSheet('payModal')">付款</button>`, 'credit-card');
   }
   if (wds.ok) {
     $('wdCount').textContent = wds.items.length ? ' ' + wds.items.length : '';
     $('myWithdrawals').innerHTML = wds.items.map((x) => `<tr><td>${fmtTime(x.created_at)}</td><td>尾号 ${esc(x.destination)}</td><td>${badge(W_STATUS, x.status)}</td>${tdTrunc(x.review_note || '—')}<td class="num">${money(x.amount_cents)}</td></tr>`).join('')
-      || emptyRow(5, '暂无提现记录', '提现提交后由财务审核，驳回的提现原路退回钱包。', '<button class="btn sm" onclick="openWithdraw()">提现</button>');
+      || emptyRow(5, '还没有提现记录', '提现提交后由财务审核，驳回的提现原路退回钱包。', '<button class="btn sm" onclick="openWithdraw()">提现</button>', 'landmark');
   }
 }
 
@@ -316,41 +469,38 @@ async function moneyAction(form, path, body, msgId, btnId, modalId) {
   refreshCurrent();
   return j;
 }
-function doTopup() { return moneyAction('topup', '/api/topup', { amount: $('topupAmount').value.trim() }, 'topupMsg', null, 'topupModal'); }
+async function refreshAvail(id, suffix) {
+  const w = await api('/api/wallet');
+  if (w.ok) walletBalance = w.balance_cents;
+  $(id).textContent = `可用余额 ${walletBalance === null ? '—' : cents(walletBalance)}${suffix || ''}`;
+}
+function openTransfer() { msg('trMsg', ''); openSheet('transferModal'); refreshAvail('trAvail'); }
+function openWithdraw() { msg('wdMsg', ''); openSheet('withdrawModal'); refreshAvail('wdAvail', '　单笔上限 $500.00'); }
+function doTopup() {
+  return moneyAction('topup', '/api/topup', { amount: $('topupAmount').value.trim() }, 'topupMsg', null, 'topupModal')
+    .then((j) => { if (j) $('topupAmount').value = ''; });
+}
 function doTransfer() {
   return moneyAction('transfer', '/api/transfer', { to_email: $('trEmail').value.trim(), amount: $('trAmount').value.trim(), note: $('trNote').value.trim(), pin: $('trPin').value.trim() }, 'trMsg', 'trBtn', 'transferModal')
-    .then((j) => { if (j) { $('trPin').value = ''; $('trAmount').value = ''; } });
+    .then((j) => { if (j) { $('trPin').value = ''; $('trAmount').value = ''; $('trNote').value = ''; } });
 }
 function doPay() {
   return moneyAction('pay', '/api/pay', { merchant: $('payMerchant').value.trim(), category: $('payCategory').value, amount: $('payAmount').value.trim(), pin: $('payPin').value.trim() }, 'payMsg', 'payBtn', 'payModal')
     .then((j) => { if (j) { $('payPin').value = ''; $('payAmount').value = ''; } });
 }
-async function openWithdraw() {
-  const w = await api('/api/wallet');
-  $('wdAvail').textContent = w.ok ? cents(w.balance_cents) : '—';
-  msg('wdMsg', '');
-  openModal('withdrawModal');
-}
 function doWithdraw() {
   return moneyAction('withdraw', '/api/withdrawals', { amount: $('wdAmount').value.trim(), destination: $('wdDest').value.trim(), pin: $('wdPin').value.trim() }, 'wdMsg', null, 'withdrawModal')
     .then((j) => { if (j) { $('wdPin').value = ''; $('wdAmount').value = ''; } });
 }
-let toastTimer;
-function toast(text, isErr) {
-  let t = $('toast');
-  if (!t) { t = document.createElement('div'); t.id = 'toast'; t.setAttribute('role', 'status'); document.body.appendChild(t); }
-  t.className = 'toast notice ' + (isErr ? '' : 'ok');
-  t.textContent = text; t.hidden = false;
-  clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.hidden = true; }, 3500);
-}
 
-// ---------- 交易表（我的交易 / 运营后台交易 共用） ----------
+// ---------- 交易表（我的流水 / 运营后台交易 共用） ----------
 // 结构（Carbon 数据表格）：工具栏（搜索 + 筛选 + 导出）→ 可折叠筛选面板 → 已生效筛选条件 → 表格 → 分页
+// 用户端在手机上用按天分组的动态列表代替表格。
 const TX = {
   me: { el: 'meTx', list: '/api/transactions', exp: '/api/transactions/export', admin: false, page: 1, size: 25, sort: 'created_at', order: 'desc', built: false },
   admin: { el: 'adminTx', list: '/api/admin/transactions', exp: '/api/admin/transactions/export', admin: true, page: 1, size: 25, sort: 'created_at', order: 'desc', built: false },
 };
-const FILTER_LABELS = { from: '开始', to: '结束', type: '类型', status: '状态', min_amount: '最小金额', max_amount: '最大金额', merchant: '商户', email: '用户' };
+const FILTER_LABELS = { from: '开始', to: '结束', type: '类型', status: '状态', min_amount: '最小金额', max_amount: '最大金额', merchant: '商户' };
 function buildTxShell(key) {
   const c = TX[key];
   if (c.built) return;
@@ -362,10 +512,10 @@ function buildTxShell(key) {
     <form class="tx-form">
       <div class="toolbar">
         <div class="toolbar-left">
-          <input name="${c.admin ? 'email' : 'q'}" class="search" type="search" placeholder="${c.admin ? '按用户邮箱搜索' : '搜索说明、商户或对方'}" aria-label="搜索">
-          <button type="button" class="btn sm f-toggle" aria-expanded="false">筛选<span class="count" hidden></span></button>
+          <span class="search-wrap">${icon('search', 16)}<input name="${c.admin ? 'email' : 'q'}" class="search" type="search" placeholder="${c.admin ? '按用户邮箱搜索' : '搜索说明、商户或对方'}" aria-label="搜索"></span>
+          <button type="button" class="btn sm f-toggle" aria-expanded="false">${icon('sliders-horizontal', 16)}筛选<span class="count" hidden></span></button>
         </div>
-        <div class="toolbar-right">${canExport ? `<button type="button" class="btn sm" data-exp="csv">导出 CSV</button><button type="button" class="btn sm" data-exp="xlsx">导出 Excel</button>` : ''}</div>
+        <div class="toolbar-right">${canExport ? `<button type="button" class="btn sm" data-exp="csv">${icon('download', 16)}CSV</button><button type="button" class="btn sm" data-exp="xlsx">${icon('download', 16)}Excel</button>` : ''}</div>
       </div>
       <div class="filter-panel" hidden>
         <div class="filter-grid">
@@ -379,10 +529,11 @@ function buildTxShell(key) {
       </div>
     </form>
     <div class="chips" hidden></div>
-    <div class="table-wrap"><table class="data"><thead><tr>
+    <div class="table-wrap ${c.admin ? '' : 'desktop-only'}"><table class="data ${c.admin ? 'stack' : ''}"><thead><tr>
       <th class="sortable" data-sort="created_at">时间</th><th>编号</th>${c.admin ? '<th>用户</th>' : ''}<th>类型</th><th>商户 / 对方</th><th>说明</th><th>状态</th>
       <th class="num sortable" data-sort="amount">金额</th><th class="num">交易后余额</th></tr></thead>
       <tbody></tbody><tfoot></tfoot></table></div>
+    ${c.admin ? '' : '<ul class="feed mobile-only tx-feed"></ul>'}
     <div class="pager"><span class="p-info"></span><span class="row"><label class="hint">每页 <select class="p-size" aria-label="每页条数">${[10, 25, 50, 100].map((n) => `<option ${n === c.size ? 'selected' : ''}>${n}</option>`).join('')}</select></label><button class="btn sm p-prev">上一页</button><button class="btn sm p-next">下一页</button></span></div>`;
   const root = $(c.el);
   const form = root.querySelector('.tx-form');
@@ -394,10 +545,14 @@ function buildTxShell(key) {
   let searchTimer;
   form.querySelector('.search').addEventListener('input', () => { clearTimeout(searchTimer); searchTimer = setTimeout(() => { c.page = 1; loadTxTable(key); }, 350); });
   root.querySelector('.chips').addEventListener('click', (e) => {
-    const name = e.target.dataset && e.target.dataset.clear;
+    const name = e.target.closest('[data-clear]') && e.target.closest('[data-clear]').dataset.clear;
     if (!name) return;
     form.elements[name].value = '';
     c.page = 1; loadTxTable(key);
+  });
+  root.querySelector('tbody').addEventListener('click', (e) => {
+    const tr = e.target.closest('tr[data-id]');
+    if (tr) openTxDetail(Number(tr.dataset.id));
   });
   root.querySelectorAll('th.sortable').forEach((th) => th.addEventListener('click', () => {
     const s = th.dataset.sort;
@@ -424,7 +579,7 @@ function renderChips(key) {
   const active = [];
   for (const name of Object.keys(FILTER_LABELS)) {
     const el = form.elements[name];
-    if (!el || !el.value.trim() || el.classList.contains('search')) continue;
+    if (!el || !el.value.trim()) continue;
     let text = el.value.trim();
     if (name === 'type') text = TYPE_LABEL[text] || text;
     if (name === 'status') text = (STATUS[text] || [text])[0];
@@ -445,22 +600,25 @@ async function loadTxTable(key) {
   const qs = txQuery(key, { page: c.page, page_size: c.size });
   const j = await api(c.list + '?' + qs.toString());
   const body = root.querySelector('tbody');
+  const feed = root.querySelector('.tx-feed');
   const cols = c.admin ? 9 : 8;
-  if (!j.ok) { body.innerHTML = emptyRow(cols, '无法加载交易', errText(j)); return; }
+  if (!j.ok) { body.innerHTML = emptyRow(cols, '无法加载交易', errText(j), '', 'circle-alert'); if (feed) feed.innerHTML = `<li class="feed-empty">${esc(errText(j))}</li>`; return; }
   const total = j.filtered_total;
   const pages = Math.max(1, Math.ceil(total / c.size));
   if (c.page > pages) { c.page = pages; return loadTxTable(key); }
   const m = c.admin ? cents : money;
-  body.innerHTML = j.items.map((t) => `<tr>
+  j.items.forEach((t) => txCache.set(t.id, t));
+  body.innerHTML = j.items.map((t) => `<tr class="clickable" data-id="${t.id}">
     <td>${fmtTime(t.created_at)}</td><td class="id">#${t.id}</td>
     ${c.admin ? tdTrunc(t.user_email || '#' + t.user_id) : ''}
     <td>${esc(TYPE_LABEL[t.type] || t.type)}</td>
     ${tdTrunc(t.merchant || t.counterparty_email || '—')}
     ${tdTrunc(t.description || '—', 'wide')}
     <td>${badge(STATUS, t.status || 'SUCCEEDED')}</td>
-    <td class="num">${m(t.amount_cents, { signed: true })}</td>
+    <td class="num ${t.amount_cents > 0 ? 'up' : ''}">${m(t.amount_cents, { signed: true })}</td>
     <td class="num">${m(t.balance_after_cents)}</td></tr>`).join('')
-    || emptyRow(cols, '没有符合条件的交易', '调整或清除筛选条件后重试。');
+    || emptyRow(cols, '没有符合条件的交易', '调整或清除筛选条件后重试。', '', 'search');
+  if (feed) feed.innerHTML = feedHtml(j.items, { balance: true, empty: '没有符合条件的交易' });
   root.querySelector('tfoot').innerHTML = total ? `<tr><td colspan="${cols - 2}">筛选结果合计 · ${esc(j.period.label)} · 收入 ${m(j.summary.inflow_cents)} · 支出 ${m(j.summary.outflow_cents)} · 净流入 ${m(j.summary.net_flow_cents, { signed: true })}</td><td class="num" colspan="2">${total.toLocaleString('en-US')} 笔</td></tr>` : '';
   root.querySelectorAll('th.sortable').forEach((th) => th.setAttribute('aria-sort', th.dataset.sort === c.sort ? (c.order === 'asc' ? 'ascending' : 'descending') : 'none'));
   const from = total ? (c.page - 1) * c.size + 1 : 0;
@@ -486,10 +644,10 @@ async function exportTx(key, format) {
 async function loadOrders() {
   const j = await api('/api/orders');
   if (!j.ok) return;
-  $('orderBody').innerHTML = j.items.map((o) => `<tr><td>${fmtTime(o.created_at)}</td>${tdTrunc(o.name || o.product_id)}<td>${o.side === 'BUY' ? '买入' : '卖出'}</td>
+  $('orderBody').innerHTML = j.items.map((o) => `<tr>${tdTrunc(o.name || o.product_id)}<td>${fmtTime(o.created_at)}</td><td>${o.side === 'BUY' ? '买入' : '卖出'}</td>
     <td class="num">${qtyFmt(o.quantity_milli)}</td><td class="num">${cents(o.price_cents)}</td><td class="num">${money(o.total_cents)}</td>
     <td class="num">${o.side === 'SELL' ? signedHtml(o.realized_pl_cents, money(Math.abs(o.realized_pl_cents))) : '—'}</td><td>${badge({ FILLED: ['已成交', 'success'] }, o.status)}</td></tr>`).join('')
-    || emptyRow(8, '暂无投资订单', '在「投资」页选择产品买入后，订单会显示在这里。', '<button class="btn sm" onclick="showView(\'invest\')">去投资</button>');
+    || emptyRow(8, '还没有投资订单', '在「投资」页选择产品买入后，订单会显示在这里。', `<button class="btn sm" onclick="showView('invest')">去投资</button>`, 'chart-line');
 }
 
 // ---------- 投资 ----------
@@ -501,7 +659,6 @@ async function loadProducts() {
   const j = await api('/api/products');
   if (!j.ok) return;
   products = j.items; simDay = j.simulated_day;
-  $('simDay').textContent = '模拟日 day-' + simDay;
   $('alertProduct').innerHTML = products.filter((p) => p.tradeable).map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
   renderProducts();
 }
@@ -509,11 +666,11 @@ function renderProducts() {
   const type = $('prodType').value, risk = $('prodRisk').value, q = $('prodQ').value.trim();
   const list = products.filter((p) => (!type || p.type === type) && (!risk || p.risk === risk) && (!q || p.name.includes(q)));
   $('productBody').innerHTML = list.map((p) => `<tr>
-    <td class="trunc wide" title="${esc(p.name + '：' + p.desc)}"><b style="font-weight:500">${esc(p.name)}</b><span class="muted">${esc(p.desc)}</span></td><td>${esc(p.type_zh)}</td><td><span class="badge plain">${esc(p.risk)} · ${esc(p.risk_label)}</span></td>
+    <td class="trunc wide" title="${esc(p.name + '：' + p.desc)}"><b style="font-weight:500">${esc(p.name)}</b><span class="muted desktop-only">${esc(p.desc)}</span></td><td>${esc(p.type_zh)}</td><td><span class="badge plain">${esc(p.risk)} · ${esc(p.risk_label)}</span></td>
     <td class="num">${cents(p.price_cents)}</td><td class="num">${signedHtml(p.day_change_pct, pct(p.day_change_pct))}</td>
     <td>${Charts.spark(p.sparkline)}</td>
-    <td class="act"><span class="row" style="flex-wrap:nowrap;justify-content:flex-end"><button class="btn sm ghost" onclick="toggleWatch('${esc(p.id)}')" aria-pressed="${p.watched}">${p.watched ? '已自选' : '加自选'}</button>${p.tradeable ? `<button class="btn sm" onclick="openProduct('${esc(p.id)}')">交易</button>` : '<span class="hint">仅作基准</span>'}</span></td></tr>`).join('')
-    || emptyRow(7, '没有符合条件的产品', '换一个类型或风险等级试试。');
+    <td class="act"><span class="row" style="flex-wrap:nowrap;justify-content:flex-end"><button class="btn sm ghost" onclick="toggleWatch('${esc(p.id)}')" aria-pressed="${p.watched}">${icon('star', 16)}${p.watched ? '已自选' : '自选'}</button>${p.tradeable ? `<button class="btn sm" onclick="openProduct('${esc(p.id)}')">交易</button>` : '<span class="hint">仅作基准</span>'}</span></td></tr>`).join('')
+    || emptyRow(7, '没有符合条件的产品', '换一个类型或风险等级试试。', '', 'search');
 }
 async function loadHoldings() {
   const j = await api('/api/holdings');
@@ -524,7 +681,7 @@ async function loadHoldings() {
     <td class="num">${signedHtml(h.unrealized_pl_cents, money(Math.abs(h.unrealized_pl_cents)))}</td><td class="num">${signedHtml(h.unrealized_pct, pct(h.unrealized_pct))}</td>
     <td class="num">${h.weight_pct.toFixed(1)}%</td><td>${Charts.spark(h.sparkline)}</td>
     <td class="act"><button class="btn sm" onclick="openProduct('${esc(h.product_id)}','SELL')">卖出</button></td></tr>`).join('')
-    || emptyRow(11, '暂无持仓', '从下方产品列表选择一个模拟产品买入。');
+    || emptyRow(11, '还没有持仓', '从下方产品列表选一个模拟产品买入。', '', 'piggy-bank');
   $('realizedLine').innerHTML = `累计已实现盈亏 ${signedHtml(j.realized_pl_cents, money(Math.abs(j.realized_pl_cents)))}`;
   const fds = j.fixed_deposits || [];
   $('fdCard').hidden = !fds.length;
@@ -556,7 +713,7 @@ async function loadAlerts() {
   $('alertBody').innerHTML = j.items.map((a) => `<tr>${tdTrunc(a.name)}<td>${cond[a.condition] || esc(a.condition)}</td>
     <td class="num">${a.condition === 'DAY_CHANGE' ? (a.threshold_cents / 100).toFixed(2) + '%' : cents(a.threshold_cents)}</td>
     <td>${a.mode === 'ONCE' ? '触发一次' : '每次触发'}</td><td>${badge(st, a.status)}</td><td class="act"><button class="btn sm ghost" onclick="delAlert(${a.id})">删除</button></td></tr>`).join('')
-    || emptyRow(6, '暂无价格提醒', '在上方选择产品和条件，价格达到阈值时会在应用内提醒。');
+    || emptyRow(6, '还没有价格提醒', '在上方选择产品和条件，价格达到阈值时会在应用内提醒。', '', 'bell');
 }
 async function addAlert() {
   const condition = $('alertCond').value;
@@ -574,17 +731,17 @@ function openProduct(id, side) {
   if (!p) return;
   curProduct = p; curPreview = null;
   $('pmName').textContent = p.name;
-  $('pmMeta').textContent = `${p.type_zh} · ${p.risk} ${p.risk_label} · 现价 ${cents(p.price_cents)} · 模拟日 day-${simDay}`;
+  $('pmMeta').textContent = `${p.type_zh} · ${p.risk} ${p.risk_label} · 现价 ${cents(p.price_cents)}`;
   $('pmInfo').textContent = p.type === 'FIXED_DEPOSIT'
     ? `按金额申购，年化 ${(p.rate_bps / 100).toFixed(2)}%，${p.term_days} 个模拟日后到期；提前支取按已存天数计息。`
     : `${p.desc} 年化分红率 ${(p.dividend_yield * 100).toFixed(1)}%。`;
   setSide(side || 'BUY');
   $('pmAmount').value = ''; $('pmQty').value = ''; msg('pmMsg', '');
   $('pmChart').innerHTML = '';
-  openModal('productModal');
+  openSheet('productModal');
   api('/api/products/' + encodeURIComponent(id) + '?range=1M').then((j) => {
     if (!j.ok) return;
-    Charts.line($('pmChart'), { xLabels: j.history.map((h) => 'day-' + h.day), series: [{ name: '价格', cls: 'line-1', values: j.history.map((h) => h.price_cents) }], format: (v) => cents(Math.round(v)), axisFormat: (v, top) => axisMoney(v, top), height: 200 });
+    Charts.line($('pmChart'), { xLabels: j.history.map((h) => 'day-' + h.day), series: [{ name: '价格', cls: 'line-1', values: j.history.map((h) => h.price_cents) }], format: (v) => cents(Math.round(v)), axisFormat: (v, top) => axisMoney(v, top), height: 180 });
   });
 }
 function setSide(s) {
@@ -602,11 +759,11 @@ async function previewOrder() {
   const dd = (k, v) => `<dt>${k}</dt><dd>${v}</dd>`;
   $('reviewBody').innerHTML = dd('产品', esc(j.name)) + dd('方向', j.side === 'BUY' ? '买入' : '卖出') + dd('数量', qtyFmt(j.quantity_milli) + ' 份')
     + dd(`成交价（day-${j.simulated_day}）`, cents(j.price_cents)) + dd('手续费', cents(0)) + dd('成交额', '<b>' + cents(j.total_cents) + '</b>') + dd('成交后现金', cents(j.cash_after_cents));
-  $('reviewWarn').innerHTML = (j.shortfall_cents ? `<p class="notice" style="margin-top:var(--space-3)">余额不足，还差 ${cents(j.shortfall_cents)}。</p>` : '')
-    + (j.risk_warning ? `<p class="notice" style="margin-top:var(--space-3)">${esc(j.risk_warning)}</p>` : '');
+  $('reviewWarn').innerHTML = (j.shortfall_cents ? `<p class="notice" style="margin-top:var(--space-3)">${icon('circle-alert', 18)}余额不足，还差 ${cents(j.shortfall_cents)}。</p>` : '')
+    + (j.risk_warning ? `<p class="notice" style="margin-top:var(--space-3)">${icon('circle-alert', 18)}${esc(j.risk_warning)}</p>` : '');
   $('confirmOrderBtn').textContent = `确认${j.side === 'BUY' ? '买入' : '卖出'} ${cents(j.total_cents)}`;
   $('reviewPin').value = ''; msg('reviewMsg', '');
-  closeModal('productModal'); openModal('reviewModal');
+  closeModal('productModal'); openSheet('reviewModal');
 }
 async function confirmOrder() {
   if (!curPreview) return;
@@ -622,17 +779,16 @@ async function confirmOrder() {
     + (j.quantity !== undefined ? dd('数量', Number(j.quantity).toFixed(3) + ' 份') : '') + (j.price_cents ? dd('成交价', cents(j.price_cents)) : '')
     + dd('成交额', cents(o.total_cents)) + (j.side === 'SELL' ? dd('已实现盈亏', signedHtml(j.realized_pl_cents, cents(Math.abs(j.realized_pl_cents)))) : '')
     + (j.cash_after_cents !== undefined ? dd('成交后现金', cents(j.cash_after_cents)) : '');
-  closeModal('reviewModal'); openModal('receiptModal');
+  closeModal('reviewModal'); openSheet('receiptModal');
 }
 
-// 风险测评 / 目标 / 再平衡
 async function openRiskQuiz() {
   const j = await api('/api/risk-quiz');
   if (!j.ok) return toast(errText(j), true);
   $('quizBox').innerHTML = j.questions.map((q, i) => `<fieldset style="border:0;padding:0;margin:0 0 var(--space-4)"><legend style="font-weight:500;margin-bottom:var(--space-2)">${i + 1}. ${esc(q.q)}</legend>
-    ${q.options.map((o, k) => `<label class="row" style="margin:var(--space-1) 0;flex-wrap:nowrap"><input type="radio" name="q${i}" value="${k}"> ${esc(o)}</label>`).join('')}</fieldset>`).join('');
+    ${q.options.map((o, k) => `<label class="row" style="min-height:36px;flex-wrap:nowrap"><input type="radio" name="q${i}" value="${k}"> ${esc(o)}</label>`).join('')}</fieldset>`).join('');
   $('quizResult').innerHTML = '';
-  openModal('riskModal');
+  openSheet('riskModal');
 }
 async function submitQuiz() {
   const answers = [];
@@ -643,7 +799,7 @@ async function submitQuiz() {
   }
   const j = await api('/api/risk-quiz', { method: 'POST', body: { answers } });
   if (!j.ok) { $('quizResult').innerHTML = `<p class="msg err">${esc(errText(j))}</p>`; return; }
-  $('quizResult').innerHTML = `<div class="notice ok">结果：${esc(j.level_zh)}，得分 ${j.score}/20，可买产品风险上限 ${esc(j.max_risk)}。示例配置：${Object.entries(j.suggested).map(([k, v]) => `${k} ${v}%`).join('，')}。</div>`;
+  $('quizResult').innerHTML = `<div class="notice ok">${icon('circle-check', 18)}<span>结果：${esc(j.level_zh)}，得分 ${j.score}/20，可买产品风险上限 ${esc(j.max_risk)}。示例配置：${Object.entries(j.suggested).map(([k, v]) => `${k} ${v}%`).join('，')}。</span></div>`;
   loadRisk();
 }
 async function loadRisk() {
@@ -657,7 +813,7 @@ async function openGoals() {
     ? `<div class="card" style="margin:0"><table class="data"><thead><tr><th>目标</th><th class="num">目标金额</th><th class="num">进度</th><th class="act"></th></tr></thead><tbody>${j.items.map((g) => `<tr>${tdTrunc(g.name + (g.target_date ? '（' + g.target_date + '）' : ''))}<td class="num">${money(g.target_cents)}</td><td class="num">${g.progress_pct.toFixed(1)}%</td><td class="act"><button class="btn sm ghost" onclick="delGoal(${g.id})">删除</button></td></tr>`).join('')}</tbody></table></div>`
     : '<p class="hint">还没有目标。</p>';
   msg('goalMsg', '');
-  openModal('goalsModal');
+  openSheet('goalsModal');
 }
 async function addGoal() {
   const j = await api('/api/goals', { method: 'POST', body: { name: $('goalName').value.trim(), target_amount: $('goalAmount').value.trim(), target_date: $('goalDate').value } });
@@ -668,15 +824,15 @@ async function addGoal() {
 async function delGoal(id) { await api('/api/goals/' + id, { method: 'DELETE' }); openGoals(); }
 async function openRebalance() {
   const j = await api('/api/rebalance/preview');
-  if (!j.ok) $('rebalanceBody').innerHTML = `<p class="notice">${esc(j.error)}。请先完成风险测评。</p>`;
+  if (!j.ok) $('rebalanceBody').innerHTML = `<p class="notice">${icon('circle-alert', 18)}${esc(j.error)}。请先完成风险测评。</p>`;
   else {
-    $('rebalanceBody').innerHTML = `<div class="card" style="margin:0"><table class="data"><thead><tr><th>类别</th><th class="num">目标</th><th class="num">当前</th><th class="num">偏离</th><th class="num">容忍区间</th><th>状态</th></tr></thead><tbody>
-      ${j.items.map((i) => `<tr><td>${esc(i.class_zh)}</td><td class="num">${i.target_pct}%</td><td class="num">${i.current_pct.toFixed(1)}%</td><td class="num">${i.drift_pct >= 0 ? '+' : '−'}${Math.abs(i.drift_pct).toFixed(1)}pp</td><td class="num">±${i.band_pp.toFixed(2)}pp</td><td>${i.breached ? '<span class="badge warning">超出区间</span>' : '<span class="badge success">区间内</span>'}</td></tr>`).join('')}</tbody></table></div>
+    $('rebalanceBody').innerHTML = `<div class="card" style="margin:0"><table class="data"><thead><tr><th>类别</th><th class="num">目标</th><th class="num">当前</th><th class="num">偏离</th><th>状态</th></tr></thead><tbody>
+      ${j.items.map((i) => `<tr><td>${esc(i.class_zh)}</td><td class="num">${i.target_pct}%</td><td class="num">${i.current_pct.toFixed(1)}%</td><td class="num">${i.drift_pct >= 0 ? '+' : '−'}${Math.abs(i.drift_pct).toFixed(1)}pp</td><td>${i.breached ? '<span class="badge warning">超出区间</span>' : '<span class="badge success">区间内</span>'}</td></tr>`).join('')}</tbody></table></div>
       <h3 style="margin:var(--space-4) 0 var(--space-2)">建议交易</h3>
       ${j.suggestions.length ? `<dl class="kv">${j.suggestions.map((s) => `<dt>${s.side === 'BUY' ? '买入' : '卖出'} ${esc(s.name)}</dt><dd>${cents(s.amount_cents)}</dd>`).join('')}</dl>` : '<p class="hint">各类别均在区间内，无需交易。</p>'}`;
   }
   msg('rebMsg', '');
-  openModal('rebalanceModal');
+  openSheet('rebalanceModal');
 }
 async function executeRebalance() {
   const btn = $('rebExecBtn'); btn.disabled = true;
@@ -688,16 +844,25 @@ async function executeRebalance() {
   loadInvest();
 }
 
-// ---------- 设置 ----------
+// ---------- 我的 ----------
 function loadSettings() {
   $('pinSetForm').hidden = !!me.has_pin;
   $('pinChangeForm').hidden = !me.has_pin;
+  syncThemeSeg();
   loadAudit();
 }
+function currentTheme() { try { return localStorage.getItem('spacepay_theme') || 'system'; } catch (_) { return 'system'; } }
+function setTheme(t) {
+  try { if (t === 'system') localStorage.removeItem('spacepay_theme'); else localStorage.setItem('spacepay_theme', t); } catch (_) { /* ignore */ }
+  if (t === 'system') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = t;
+  syncThemeSeg();
+  refreshCurrent();
+}
+function syncThemeSeg() { const t = currentTheme(); document.querySelectorAll('#themeSeg button').forEach((b) => b.classList.toggle('active', b.dataset.themeOpt === t)); }
 async function setPin() {
   const j = await api('/api/security/set-pin', { method: 'POST', body: { pin: $('pinNew').value.trim(), password: $('pinPw').value } });
   msg('pinMsg', j.ok ? j.message : errText(j), !j.ok);
-  if (j.ok) { me.has_pin = 1; $('pinNew').value = ''; $('pinPw').value = ''; loadSettings(); }
+  if (j.ok) { me.has_pin = 1; $('pinNew').value = ''; $('pinPw').value = ''; loadSettings(); toast('支付 PIN 已设置'); }
 }
 async function changePin() {
   const j = await api('/api/security/change-pin', { method: 'POST', body: { old_pin: $('pinOld').value.trim(), new_pin: $('pinNew2').value.trim() } });
@@ -712,7 +877,7 @@ async function changePw() {
 async function loadAudit() {
   const j = await api('/api/security/audit');
   if (!j.ok) return;
-  $('auditBody').innerHTML = j.items.map((a) => `<tr><td>${fmtTime(a.created_at)}</td><td>${esc(AUDIT_LABEL[a.action] || a.action)}</td>${tdTrunc(a.detail || '—', 'wide')}<td class="mono">${esc(a.ip || '—')}</td></tr>`).join('')
+  $('auditBody').innerHTML = j.items.map((a) => `<tr><td>${esc(AUDIT_LABEL[a.action] || a.action)}</td><td>${fmtTime(a.created_at)}</td>${tdTrunc(a.detail || '—', 'wide')}<td class="mono">${esc(a.ip || '—')}</td></tr>`).join('')
     || emptyRow(4, '暂无记录', '');
 }
 async function exportData() {
@@ -754,29 +919,25 @@ async function loadAdminOverview() {
     format: (v) => cents(Math.round(v)), axisFormat: axisMoney,
   });
 }
-
 function pager(id, page, size, total, fn) {
   const pages = Math.max(1, Math.ceil(total / size));
   const from = total ? (page - 1) * size + 1 : 0;
   $(id).innerHTML = `<span>第 ${from}–${Math.min(total, page * size)} 条，共 ${total} 条</span><span class="row"><button class="btn sm" ${page <= 1 ? 'disabled' : ''} onclick="${fn}(${page - 1})">上一页</button><button class="btn sm" ${page >= pages ? 'disabled' : ''} onclick="${fn}(${page + 1})">下一页</button></span>`;
 }
-
 let paymentsCache = [];
 async function loadAdminPayments(page) {
   const qs = new URLSearchParams({ page, page_size: 20 });
   if ($('cpEmail').value.trim()) qs.set('email', $('cpEmail').value.trim());
   if ($('cpStatus').value) qs.set('status', $('cpStatus').value);
   const j = await api('/api/admin/payments?' + qs);
-  if (!j.ok) { $('cpBody').innerHTML = emptyRow(9, '无法加载', errText(j)); return; }
+  if (!j.ok) { $('cpBody').innerHTML = emptyRow(9, '无法加载', errText(j), '', 'circle-alert'); return; }
   paymentsCache = j.items;
   $('cpBody').innerHTML = j.items.map((p) => `<tr><td class="id">#${p.id}</td><td>${fmtTime(p.created_at)}</td>${tdTrunc(p.user_email)}${tdTrunc(p.merchant)}
     <td>${badge(STATUS, p.status)}</td><td class="num">${cents(p.amount_cents)}</td><td class="num">${p.refunded_cents ? cents(p.refunded_cents) : '—'}</td><td class="num">${cents(p.refundable_cents)}</td>
-    <td class="act">${can('refund.create') && p.refundable_cents > 0 ? `<button class="btn sm" onclick="openRefund(${p.id})">退款</button>` : ''}</td></tr>`).join('')
-    || emptyRow(9, '没有符合条件的支付', '调整搜索条件后重试。');
+    <td class="act">${can('refund.create') && p.refundable_cents > 0 ? `<button class="btn sm" onclick="openRefund(${p.id})">${icon('undo-2', 16)}退款</button>` : ''}</td></tr>`).join('')
+    || emptyRow(9, '没有符合条件的支付', '调整搜索条件后重试。', '', 'search');
   pager('cpPager', j.page, j.page_size, j.filtered_total, 'loadAdminPayments');
 }
-
-// 运营操作弹窗：先填原因（和金额），提交后服务端返回摘要，再在确认弹窗中确认
 let op = null;
 function openOp(cfg) {
   op = cfg;
@@ -792,7 +953,7 @@ function openOp(cfg) {
   $('opBtn').className = 'btn ' + (cfg.danger ? 'danger solid' : 'primary');
   msg('opMsg', '');
   formKeys.op = newKey();
-  openModal('opModal');
+  openSheet('opModal');
 }
 async function submitOp() {
   if (!op) return;
@@ -817,7 +978,6 @@ function openRefund(id) {
     done: () => loadAdminPayments(1),
   });
 }
-
 let wStatus = 'PENDING';
 function setWStatus(s) {
   wStatus = s;
@@ -831,7 +991,7 @@ async function loadAdminWithdrawals() {
   $('cwBody').innerHTML = j.items.map((w) => `<tr><td class="id">#${w.id}</td><td>${fmtTime(w.created_at)}</td>${tdTrunc(w.user_email)}<td>尾号 ${esc(w.destination)}</td>
     <td>${badge(W_STATUS, w.status)}</td>${tdTrunc(w.review_note || '—')}<td class="num">${cents(w.amount_cents)}</td>
     <td class="act">${review && w.status === 'PENDING' ? (w.user_id === me.id ? '<span class="hint">本人申请，需他人审核</span>' : `<span class="row" style="flex-wrap:nowrap;justify-content:flex-end"><button class="btn sm danger" onclick="reviewW(${w.id},false)">驳回</button><button class="btn sm primary" onclick="reviewW(${w.id},true)">批准</button></span>`) : ''}</td></tr>`).join('')
-    || emptyRow(8, wStatus === 'PENDING' ? '没有待审核的提现' : '没有记录', wStatus === 'PENDING' ? '新的提现申请会出现在这里。' : '');
+    || emptyRow(8, wStatus === 'PENDING' ? '没有待审核的提现' : '没有记录', wStatus === 'PENDING' ? '新的提现申请会出现在这里。' : '', '', 'circle-check');
   window._wd = j.items;
 }
 function reviewW(id, approve) {
@@ -843,7 +1003,6 @@ function reviewW(id, approve) {
     done: loadAdminWithdrawals,
   });
 }
-
 let usersCache = [];
 async function loadAdminUsers(page) {
   const qs = new URLSearchParams({ page, page_size: 20 });
@@ -856,7 +1015,7 @@ async function loadAdminUsers(page) {
   $('cuBody').innerHTML = j.items.map((u) => `<tr><td class="id">#${u.id}</td>${tdTrunc(u.email)}${tdTrunc(u.nickname)}<td>${esc(ROLE_LABEL[u.role] || u.role)}</td>
     <td title="${esc(u.frozen_reason || '')}">${badge(U_STATUS, u.status)}</td><td class="num">${cents(u.balance_cents)}</td><td>${fmtTime(u.created_at)}</td>
     <td class="act">${u.id === me.id ? '<span class="hint">当前账户</span>' : `<span class="row" style="flex-wrap:nowrap;justify-content:flex-end">${canRole ? `<button class="btn sm ghost" onclick="roleU(${u.id})">调整角色</button>` : ''}${canFreeze ? (u.status === 'FROZEN' ? `<button class="btn sm" onclick="freezeU(${u.id},false)">解冻</button>` : `<button class="btn sm danger" onclick="freezeU(${u.id},true)">冻结</button>`) : ''}</span>`}</td></tr>`).join('')
-    || emptyRow(8, '没有符合条件的用户', '调整搜索条件后重试。');
+    || emptyRow(8, '没有符合条件的用户', '调整搜索条件后重试。', '', 'search');
   pager('cuPager', j.page, j.page_size, j.filtered_total, 'loadAdminUsers');
 }
 function freezeU(id, freeze) {
@@ -867,13 +1026,12 @@ function roleU(id) {
   const u = usersCache.find((x) => x.id === id);
   openOp({ title: '调整角色', path: `/api/admin/users/${id}/role`, role: true, roleDefault: u.role, reason: false, info: [['账户', u.email], ['当前角色', ROLE_LABEL[u.role]]], done: () => loadAdminUsers(1) });
 }
-
 async function runRecon() {
   const btn = $('reconBtn');
   btn.disabled = true;
   const j = await api('/api/admin/reconciliation');
   btn.disabled = false;
-  if (!j.ok) { $('reconResult').innerHTML = `<p class="notice">${esc(errText(j))}</p>`; return; }
+  if (!j.ok) { $('reconResult').innerHTML = `<p class="notice">${icon('circle-alert', 18)}${esc(errText(j))}</p>`; return; }
   const r = j.reconciliation;
   const names = { journal_balanced: '凭证借贷不平衡', wallet_vs_ledger: '钱包余额与账本不一致', wallet_vs_last_transaction: '钱包余额与最后一笔流水不一致', non_negative_balance: '余额为负', clearing_p2p_zero: '转账清算科目未归零', clearing_withdrawals_matches_pending: '提现在途与待审核金额不一致' };
   const checks = [
@@ -889,11 +1047,10 @@ async function runRecon() {
     return `<tr><td>${label}</td><td>${n ? `<span class="badge danger">${n} 项差异</span>` : '<span class="badge success">通过</span>'}</td><td class="muted">${esc(detail)}</td></tr>`;
   }).join('');
   $('reconResult').innerHTML = `
-    <p class="notice ${r.ok ? 'ok' : ''}" style="margin-bottom:var(--space-5)">${r.ok ? '对账通过，未发现差异。' : `发现 ${r.issues.length} 项差异，请逐项核查。`}检查时间 ${fmtTime(Date.parse(r.checked_at))}。</p>
-    <div class="card"><div class="card-head"><h2>检查项</h2></div><div class="table-wrap auto"><table class="data"><thead><tr><th>检查项</th><th>结果</th><th>范围</th></tr></thead><tbody>${rows}</tbody></table></div></div>
-    ${r.issues.length ? `<div class="card"><div class="card-head"><h2>差异明细</h2></div><div class="table-wrap"><table class="data"><thead><tr><th>检查项</th><th>对象</th><th class="num">差额</th><th>明细</th></tr></thead><tbody>${r.issues.map((i) => `<tr><td>${esc(names[i.check] || i.check)}</td><td>${esc(i.user_id ? '用户 #' + i.user_id : i.journal_id || '—')}</td><td class="num">${i.difference_cents !== undefined ? cents(i.difference_cents) : '—'}</td>${tdTrunc(JSON.stringify(i), 'wide mono')}</tr>`).join('')}</tbody></table></div></div>` : ''}`;
+    <p class="notice ${r.ok ? 'ok' : ''}" style="margin-bottom:var(--space-5)">${icon(r.ok ? 'circle-check' : 'circle-alert', 18)}<span>${r.ok ? '对账通过，未发现差异。' : `发现 ${r.issues.length} 项差异，请逐项核查。`}检查时间 ${fmtTime(Date.parse(r.checked_at))}。</span></p>
+    <div class="card"><div class="card-head"><h2>检查项</h2></div><div class="table-wrap auto"><table class="data stack"><thead><tr><th>检查项</th><th>结果</th><th>范围</th></tr></thead><tbody>${rows}</tbody></table></div></div>
+    ${r.issues.length ? `<div class="card"><div class="card-head"><h2>差异明细</h2></div><div class="table-wrap"><table class="data stack"><thead><tr><th>检查项</th><th>对象</th><th class="num">差额</th><th>明细</th></tr></thead><tbody>${r.issues.map((i) => `<tr><td>${esc(names[i.check] || i.check)}</td><td>${esc(i.user_id ? '用户 #' + i.user_id : i.journal_id || '—')}</td><td class="num">${i.difference_cents !== undefined ? cents(i.difference_cents) : '—'}</td>${tdTrunc(JSON.stringify(i), 'wide mono')}</tr>`).join('')}</tbody></table></div></div>` : ''}`;
 }
-
 let logLabels = null;
 async function loadOpLogs(page) {
   const a = $('clAction').value;
@@ -904,17 +1061,38 @@ async function loadOpLogs(page) {
     $('clAction').innerHTML = '<option value="">全部操作</option>' + Object.entries(j.labels).map(([k, v]) => `<option value="${k}">${v}</option>`).join('');
   }
   const res = (r) => (r === 'SUCCEEDED' ? '<span class="badge success">成功</span>' : r === 'MISMATCH' ? '<span class="badge warning">有差异</span>' : `<span class="badge danger" title="${esc(r)}">已拒绝</span>`);
-  $('clBody').innerHTML = j.items.map((l) => `<tr><td>${fmtTime(l.created_at)}</td><td title="${esc(ROLE_LABEL[l.actor_role] || '')}">${esc(l.actor_email || '—')}<span class="muted">${esc(ROLE_LABEL[l.actor_role] || '')}</span></td>
-    <td>${esc(j.labels[l.action] || l.action)}</td><td>${esc(l.target_type ? l.target_type + (l.target_id ? ' #' + l.target_id : '') : '—')}</td>
+  $('clBody').innerHTML = j.items.map((l) => `<tr><td>${esc(j.labels[l.action] || l.action)}</td><td>${fmtTime(l.created_at)}</td><td title="${esc(ROLE_LABEL[l.actor_role] || '')}">${esc(l.actor_email || '—')}<span class="muted">${esc(ROLE_LABEL[l.actor_role] || '')}</span></td>
+    <td>${esc(l.target_type ? l.target_type + (l.target_id ? ' #' + l.target_id : '') : '—')}</td>
     <td class="num">${l.amount_cents !== null ? cents(l.amount_cents) : '—'}</td>${tdTrunc((l.reason || '—') + (l.result.startsWith('REJECTED') ? '（' + l.result.replace('REJECTED:', '') + '）' : ''), 'wide')}<td>${res(l.result)}</td><td class="id">${esc(l.request_id || '')}</td></tr>`).join('')
-    || emptyRow(8, '暂无记录', '退款、冻结、提现审核、导出与对账都会记录在这里。');
+    || emptyRow(8, '暂无记录', '退款、冻结、提现审核、导出与对账都会记录在这里。', '', 'file-text');
   pager('clPager', j.page, j.page_size, j.filtered_total, 'loadOpLogs');
+}
+
+// ---------- PWA：service worker、安装、离线提示 ----------
+let deferredInstall = null;
+window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); deferredInstall = e; $('installBtn').hidden = false; $('installHint').textContent = '安装后可以从主屏幕直接打开。'; });
+window.addEventListener('appinstalled', () => { deferredInstall = null; $('installSection').hidden = true; toast('已安装到主屏幕'); });
+async function installApp() {
+  if (!deferredInstall) return;
+  deferredInstall.prompt();
+  await deferredInstall.userChoice.catch(() => null);
+  deferredInstall = null; $('installBtn').hidden = true;
+}
+function updateNet() {
+  $('netBar').hidden = navigator.onLine;
+  if (navigator.onLine && me) refreshCurrent();
+}
+window.addEventListener('online', updateNet);
+window.addEventListener('offline', updateNet);
+if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+  window.addEventListener('load', () => { navigator.serviceWorker.register('/sw.js').catch(() => { /* 不支持或被禁用时退化为普通网页 */ }); });
 }
 
 // ---------- 启动：恢复登录 ----------
 (async () => {
+  updateNet();
   if (!token) return;
   $('authView').hidden = true; // 正在恢复会话，避免闪现登录框
   const j = await api('/api/me');
-  if (j.ok) { me = j.user; enterApp(); } else logoutLocal();
+  if (j.ok) { me = j.user; enterApp(); } else logoutLocal(j.status === 0 ? j.error : undefined);
 })();

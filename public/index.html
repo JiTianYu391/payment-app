@@ -2,37 +2,47 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>SpacePay</title>
 <meta name="description" content="SpacePay 支付与资金管理（演示环境）">
+<meta name="theme-color" content="#FFFFFF" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#141920" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="SpacePay">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" href="/brand/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/brand/apple-touch-icon.png">
 <link rel="stylesheet" href="/styles.css">
+<script>try { var t = localStorage.getItem('spacepay_theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}</script>
 </head>
 <body>
-<div class="env-bar" role="note">演示环境：全部为虚拟资金，投资价格为模拟价格，提现为模拟出款，不连接真实银行或交易市场。</div>
+<div class="env-bar" role="note">演示环境 · 虚拟资金 · 模拟价格 · 提现为模拟出款</div>
+<div class="net-bar" id="netBar" role="status" hidden><i data-icon="wifi-off" data-size="16"></i>网络已断开，恢复后自动刷新</div>
 
 <header class="topbar">
   <a class="brand" href="/" aria-label="SpacePay 首页">
     <picture>
       <source srcset="/brand/spacepay-logo-dark.svg" media="(prefers-color-scheme: dark)">
-      <img src="/brand/spacepay-logo-light.svg" alt="SpacePay" width="105" height="24">
+      <img src="/brand/spacepay-logo-light.svg" alt="SpacePay" width="105" height="24" id="brandImg">
     </picture>
   </a>
   <div class="top-meta" id="topMeta" hidden>
     <span id="simDay" class="sim-day hide-sm" title="模拟市场每小时推进 1 个模拟日"></span>
-    <div class="user-chip">
+    <button class="user-chip" onclick="showView('settings')" aria-label="我的账户">
       <span class="avatar" id="avatar" aria-hidden="true"></span>
       <span class="user-meta hide-sm"><b id="topName"></b><span id="topEmail"></span></span>
-    </div>
-    <button class="btn ghost sm" onclick="doLogout()">退出</button>
+    </button>
+    <button class="btn ghost sm hide-sm" onclick="doLogout()"><i data-icon="log-out" data-size="16"></i>退出</button>
   </div>
 </header>
 
 <!-- ============ 登录 / 注册 ============ -->
 <section id="authView" class="auth">
-  <div class="auth-brand"><picture><source srcset="/brand/spacepay-mark-dark.svg" media="(prefers-color-scheme: dark)"><img src="/brand/spacepay-mark-light.svg" alt="" width="32" height="32"></picture></div>
-  <h1 id="authTitle">登录 SpacePay</h1>
-  <p class="lead" id="authLead">使用注册邮箱和密码登录</p>
+  <div class="auth-brand"><picture><source srcset="/brand/spacepay-mark-dark.svg" media="(prefers-color-scheme: dark)"><img src="/brand/spacepay-mark-light.svg" alt="" width="40" height="40"></picture></div>
+  <h1 id="authTitle">欢迎回来</h1>
+  <p class="lead" id="authLead">登录 SpacePay，管理你的钱包与投资</p>
   <div class="card">
     <div class="tabs" role="tablist">
       <button id="tabLogin" class="tab active" role="tab" onclick="showTab('login')">登录</button>
@@ -40,146 +50,145 @@
     </div>
     <div class="card-body">
       <form id="loginPane" onsubmit="event.preventDefault(); doLogin()">
-        <label class="field"><span>邮箱</span><input id="loginEmail" type="email" autocomplete="email" required></label>
+        <label class="field"><span>邮箱</span><input id="loginEmail" type="email" autocomplete="email" inputmode="email" required></label>
         <label class="field"><span>密码</span><input id="loginPassword" type="password" autocomplete="current-password" required><small>连续输错 5 次，账户锁定 15 分钟。</small></label>
         <button class="btn primary btn-full">登录</button>
       </form>
       <form id="registerPane" hidden onsubmit="event.preventDefault(); doRegister()">
-        <label class="field"><span>邮箱</span><input id="regEmail" type="email" autocomplete="email" required></label>
+        <label class="field"><span>邮箱</span><input id="regEmail" type="email" autocomplete="email" inputmode="email" required></label>
         <label class="field"><span>验证码</span>
-          <span class="code-row"><input id="regCode" inputmode="numeric" maxlength="6" placeholder="6 位数字"><button type="button" class="btn" onclick="requestCode()">获取验证码</button></span>
+          <span class="code-row"><input id="regCode" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="6 位数字"><button type="button" class="btn" onclick="requestCode()">获取验证码</button></span>
           <small>10 分钟内有效，最多尝试 5 次。</small>
         </label>
         <div id="demoInbox" class="inbox" hidden></div>
-        <label class="field"><span>昵称</span><input id="regNickname" maxlength="30" required></label>
+        <label class="field"><span>昵称</span><input id="regNickname" maxlength="30" autocomplete="nickname" required></label>
         <label class="field"><span>密码</span><input id="regPassword" type="password" autocomplete="new-password" minlength="8" required><small>至少 8 位。</small></label>
-        <button class="btn primary btn-full">注册</button>
+        <button class="btn primary btn-full">注册并领取体验金</button>
       </form>
       <p id="authMsg" class="msg" role="status"></p>
     </div>
   </div>
-  <p class="auth-foot">注册后到账 $50.00 体验金（虚拟资金）。</p>
+  <p class="auth-foot">新用户注册即到账 $50.00 体验金（虚拟资金）</p>
 </section>
 
 <div class="app" id="appShell" hidden>
   <nav class="sidebar" aria-label="主导航"><div class="sidebar-inner">
     <div class="nav-group">
-      <div class="nav-label">我的账户</div>
-      <button class="nav-item" data-view="home" onclick="showView('home')">总览</button>
-      <button class="nav-item" data-view="wallet" onclick="showView('wallet')">钱包</button>
-      <button class="nav-item" data-view="activity" onclick="showView('activity')">交易记录</button>
-      <button class="nav-item" data-view="invest" onclick="showView('invest')">投资</button>
-      <button class="nav-item" data-view="settings" onclick="showView('settings')">设置</button>
+      <button class="nav-item" data-view="home" onclick="showView('home')"><i data-icon="house"></i>首页</button>
+      <button class="nav-item" data-view="activity" onclick="showView('activity')"><i data-icon="arrow-left-right"></i>交易</button>
+      <button class="nav-item" data-view="invest" onclick="showView('invest')"><i data-icon="chart-line"></i>投资</button>
+      <button class="nav-item" data-view="settings" onclick="showView('settings')"><i data-icon="user"></i>我的</button>
     </div>
     <div class="nav-group" id="consoleNav" hidden>
       <div class="nav-label">运营后台 <span class="badge role" id="roleLabel"></span></div>
-      <button class="nav-item" data-view="c-overview" onclick="showView('c-overview')">概览</button>
-      <button class="nav-item" data-view="c-tx" onclick="showView('c-tx')">交易</button>
-      <button class="nav-item" data-view="c-payments" onclick="showView('c-payments')">支付与退款</button>
-      <button class="nav-item" data-view="c-withdrawals" onclick="showView('c-withdrawals')">提现审核</button>
-      <button class="nav-item" data-view="c-users" onclick="showView('c-users')">用户</button>
-      <button class="nav-item" data-view="c-recon" onclick="showView('c-recon')">对账</button>
-      <button class="nav-item" data-view="c-logs" onclick="showView('c-logs')">操作日志</button>
+      <button class="nav-item" data-view="c-overview" onclick="showView('c-overview')"><i data-icon="layout-dashboard"></i>概览</button>
+      <button class="nav-item" data-view="c-tx" onclick="showView('c-tx')"><i data-icon="receipt"></i>交易</button>
+      <button class="nav-item" data-view="c-payments" onclick="showView('c-payments')"><i data-icon="credit-card"></i>支付与退款</button>
+      <button class="nav-item" data-view="c-withdrawals" onclick="showView('c-withdrawals')"><i data-icon="landmark"></i>提现审核</button>
+      <button class="nav-item" data-view="c-users" onclick="showView('c-users')"><i data-icon="users"></i>用户</button>
+      <button class="nav-item" data-view="c-recon" onclick="showView('c-recon')"><i data-icon="scale"></i>对账</button>
+      <button class="nav-item" data-view="c-logs" onclick="showView('c-logs')"><i data-icon="file-text"></i>操作日志</button>
     </div>
   </div></nav>
 
-  <main class="main">
-    <!-- ============ 总览 ============ -->
+  <main class="main" id="main">
+    <!-- ============ 首页 ============ -->
     <section id="view-home" class="view" hidden>
-      <div class="page-head"><div><h1>总览</h1><p id="homeAsOf">—</p></div>
-        <div class="page-actions"><button class="btn" onclick="togglePrivacy()" id="privacyBtn">隐藏金额</button><button class="btn" onclick="openWithdraw()">提现</button><button class="btn primary" onclick="openModal('transferModal')">转账</button></div>
-      </div>
-      <div class="kpis">
-        <div class="kpi"><div class="kpi-label">总资产</div><div class="kpi-value" id="kTotal">—</div><div class="kpi-note">现金 + 持仓市值 + 定存本息</div></div>
-        <div class="kpi"><div class="kpi-label">现金余额</div><div class="kpi-value" id="kCash">—</div><div class="kpi-note">可用于转账、付款、提现</div></div>
-        <div class="kpi"><div class="kpi-label">投资市值</div><div class="kpi-value" id="kInvested">—</div><div class="kpi-note" id="kInvestedNote">按当日模拟价计</div></div>
-        <div class="kpi"><div class="kpi-label">今日盈亏</div><div class="kpi-value" id="kToday">—</div><div class="kpi-note">已剔除今日资金进出</div></div>
-      </div>
-      <div class="card">
-        <div class="card-head"><div><h2>资产走势</h2><div class="sub">总资产与模拟基准指数（基准按期初总资产折算），单位 USD</div></div>
-          <div class="segmented" id="rangeTabs" role="group" aria-label="统计周期">
-            <button data-r="1W" onclick="setRange('1W')">1 周</button><button data-r="1M" class="active" onclick="setRange('1M')">1 月</button><button data-r="1Y" onclick="setRange('1Y')">1 年</button><button data-r="ALL" onclick="setRange('ALL')">全部</button>
+      <div class="greeting"><h1 id="greet">你好</h1><p id="homeAsOf"></p></div>
+      <div class="grid grid-home">
+        <div class="home-col">
+          <div class="hero home-hero">
+            <div class="hero-top"><span>总资产 · USD</span><button class="icon-btn" id="privacyBtn" onclick="togglePrivacy()" aria-label="隐藏金额"><i data-icon="eye"></i></button></div>
+            <div class="hero-amount" id="kTotal">—</div>
+            <div class="hero-sub"><span>现金 <b id="kCash">—</b></span><span>投资 <b id="kInvested">—</b></span><span class="pill" id="kToday">今日 —</span></div>
+            <div class="actions">
+              <button class="action primary" onclick="openTransfer()"><span class="action-icon"><i data-icon="send"></i></span>转账</button>
+              <button class="action" onclick="openSheet('payModal')"><span class="action-icon"><i data-icon="credit-card"></i></span>付款</button>
+              <button class="action" onclick="openSheet('topupModal')"><span class="action-icon"><i data-icon="plus"></i></span>充值</button>
+              <button class="action" onclick="openWithdraw()"><span class="action-icon"><i data-icon="landmark"></i></span>提现</button>
+            </div>
+          </div>
+          <div class="card home-chart">
+            <div class="card-head"><div><h2>资产走势</h2><div class="sub">总资产与模拟基准指数，单位 USD</div></div>
+              <div class="segmented" id="rangeTabs" role="group" aria-label="统计周期">
+                <button data-r="1W" onclick="setRange('1W')">1周</button><button data-r="1M" class="active" onclick="setRange('1M')">1月</button><button data-r="1Y" onclick="setRange('1Y')">1年</button><button data-r="ALL" onclick="setRange('ALL')">全部</button>
+              </div>
+            </div>
+            <div class="card-body">
+              <div class="chart-head"><div class="legend"><span><i class="l1"></i>总资产</span><span><i class="dash"></i>基准指数</span></div><span class="axis-note">横轴：模拟日 · 纵轴：USD</span></div>
+              <div id="perfChart" class="chart"></div>
+            </div>
+            <div class="metric-strip" id="perfGrid"></div>
+            <div class="card-foot"><span id="perfPeriod">统计周期：—</span>
+              <details class="defs"><summary>指标口径</summary><ul>
+                <li>总资产包含体验金、充值等资金进出，曲线变化不等于投资回报。</li>
+                <li>TWR（时间加权回报）剔除资金进出时点，适合与基准比较。</li>
+                <li>MWR（货币加权回报，Modified Dietz）反映实际经历的回报。</li>
+                <li>简单回报 =（总资产 − 累计净投入）÷ 累计净投入。</li></ul></details>
+            </div>
           </div>
         </div>
-        <div class="card-body">
-          <div class="chart-head"><div class="legend"><span><i class="l1"></i>总资产</span><span><i class="dash"></i>模拟基准指数</span></div><span class="axis-note">横轴：模拟日　纵轴：金额（USD）</span></div>
-          <div id="perfChart" class="chart"></div>
-        </div>
-        <div class="metric-strip" id="perfGrid"></div>
-        <div class="card-foot"><span id="perfPeriod">统计周期：—</span>
-          <details class="defs"><summary>指标口径</summary><ul>
-            <li>总资产包含体验金、充值等资金进出，曲线变化不等于投资回报。</li>
-            <li>TWR（时间加权回报）剔除资金进出时点，适合与基准比较。</li>
-            <li>MWR（货币加权回报，Modified Dietz）反映实际经历的回报。</li>
-            <li>简单回报 =（总资产 − 累计净投入）÷ 累计净投入。</li></ul></details>
-        </div>
-      </div>
-      <div class="grid grid-2">
-        <div class="card">
-          <div class="card-head"><div><h2>资产配置</h2><div class="sub" id="allocSub">按资产类别，金额与占总资产比例</div></div></div>
-          <div class="card-body"><div id="allocChart" class="chart"></div></div>
-        </div>
-        <div class="card">
-          <div class="card-head"><div><h2>最近交易</h2><div class="sub">最近 6 笔</div></div><button class="btn sm" onclick="showView('activity')">查看全部</button></div>
-          <div class="table-wrap auto"><table class="data"><thead><tr><th>时间</th><th>类型</th><th>对方 / 商户</th><th class="num">金额</th></tr></thead><tbody id="homeRecent"></tbody></table></div>
+        <div class="home-col">
+          <div class="card home-feed">
+            <div class="card-head"><h2>最近交易</h2><button class="link-btn" onclick="showView('activity')">全部<i data-icon="chevron-right" data-size="16"></i></button></div>
+            <ul class="feed" id="homeFeed"></ul>
+          </div>
+          <div class="card home-alloc">
+            <div class="card-head"><div><h2>资产配置</h2><div class="sub" id="allocSub">按资产类别，金额与占比</div></div></div>
+            <div class="card-body"><div id="allocChart" class="chart"></div></div>
+          </div>
         </div>
       </div>
     </section>
 
-    <!-- ============ 钱包 ============ -->
-    <section id="view-wallet" class="view" hidden>
-      <div class="page-head"><div><h1>钱包</h1><p>USD 账户 · 虚拟资金</p></div>
-        <div class="page-actions"><button class="btn" onclick="openModal('topupModal')">充值</button><button class="btn" onclick="openModal('payModal')">付款</button><button class="btn" onclick="openWithdraw()">提现</button><button class="btn primary" onclick="openModal('transferModal')">转账</button></div>
-      </div>
-      <div class="kpis">
-        <div class="kpi"><div class="kpi-label">现金余额</div><div class="kpi-value" id="wBalance">—</div><div class="kpi-note">实时</div></div>
-        <div class="kpi"><div class="kpi-label">收入</div><div class="kpi-value" id="wIn">—</div><div class="kpi-note">体验金、充值、转入、退款</div></div>
-        <div class="kpi"><div class="kpi-label">支出</div><div class="kpi-value" id="wOut">—</div><div class="kpi-note">付款、转出、提现</div></div>
-        <div class="kpi"><div class="kpi-label">投资收益</div><div class="kpi-value" id="wIncome">—</div><div class="kpi-note">分红 + 利息</div></div>
-      </div>
-      <div class="card">
-        <div class="tabs" role="tablist">
-          <button class="tab active" data-tab="pay" onclick="walletTab('pay')">付款记录<span class="muted" id="payCount"></span></button>
-          <button class="tab" data-tab="wd" onclick="walletTab('wd')">提现记录<span class="muted" id="wdCount"></span></button>
-        </div>
-        <div class="table-wrap" id="walletPay"><table class="data"><thead><tr><th>时间</th><th>商户</th><th>分类</th><th>状态</th><th class="num">金额</th><th class="num">已退款</th></tr></thead><tbody id="myPayments"></tbody></table></div>
-        <div class="table-wrap" id="walletWd" hidden><table class="data"><thead><tr><th>时间</th><th>收款账户</th><th>状态</th><th>审核备注</th><th class="num">金额</th></tr></thead><tbody id="myWithdrawals"></tbody></table></div>
-        <div class="card-foot"><span id="wPeriod">统计周期：全部历史</span>
-          <details class="defs"><summary>统计口径</summary><ul id="wDefs"></ul></details></div>
-      </div>
-    </section>
-
-    <!-- ============ 交易记录 ============ -->
+    <!-- ============ 交易（含原钱包页） ============ -->
     <section id="view-activity" class="view" hidden>
-      <div class="page-head"><div><h1>交易记录</h1><p>每行显示交易后余额，可逐笔核对</p></div></div>
-      <div class="card" id="meTx"></div>
+      <div class="page-head"><div><h1>交易</h1><p>每笔交易都显示交易后余额，可逐笔核对</p></div>
+        <div class="page-actions"><button class="btn" onclick="openSheet('topupModal')"><i data-icon="plus" data-size="16"></i>充值</button><button class="btn" onclick="openSheet('payModal')"><i data-icon="credit-card" data-size="16"></i>付款</button><button class="btn" onclick="openWithdraw()"><i data-icon="landmark" data-size="16"></i>提现</button><button class="btn primary" onclick="openTransfer()"><i data-icon="send" data-size="16"></i>转账</button></div>
+      </div>
+      <div class="stats">
+        <div class="stat"><div class="label"><i data-icon="wallet" data-size="16"></i>现金余额</div><div class="value" id="wBalance">—</div><div class="note">实时</div></div>
+        <div class="stat"><div class="label"><i data-icon="arrow-down-left" data-size="16"></i>收入</div><div class="value" id="wIn">—</div><div class="note">体验金、充值、转入、退款</div></div>
+        <div class="stat"><div class="label"><i data-icon="arrow-up-right" data-size="16"></i>支出</div><div class="value" id="wOut">—</div><div class="note">付款、转出、提现</div></div>
+        <div class="stat"><div class="label"><i data-icon="coins" data-size="16"></i>投资收益</div><div class="value" id="wIncome">—</div><div class="note">分红 + 利息</div></div>
+      </div>
+      <div class="period-line"><span id="wPeriod">统计周期：全部历史</span><details class="defs"><summary>统计口径</summary><ul id="wDefs"></ul></details></div>
       <div class="card">
-        <div class="card-head"><div><h2>投资订单</h2><div class="sub">每笔订单在一个事务内完成，同一幂等键不会重复成交</div></div></div>
-        <div class="table-wrap short"><table class="data"><thead><tr><th>时间</th><th>产品</th><th>方向</th><th class="num">数量（份）</th><th class="num">成交价</th><th class="num">成交额</th><th class="num">已实现盈亏</th><th>状态</th></tr></thead><tbody id="orderBody"></tbody></table></div>
+        <div class="tabs" role="tablist" id="actTabs">
+          <button class="tab active" data-tab="all" onclick="activityTab('all')">全部流水</button>
+          <button class="tab" data-tab="pay" onclick="activityTab('pay')">付款<span class="muted" id="payCount"></span></button>
+          <button class="tab" data-tab="wd" onclick="activityTab('wd')">提现<span class="muted" id="wdCount"></span></button>
+          <button class="tab" data-tab="orders" onclick="activityTab('orders')">投资订单</button>
+        </div>
+        <div id="pane-all"><div id="meTx"></div></div>
+        <div id="pane-pay" hidden><div class="table-wrap"><table class="data stack"><thead><tr><th>时间</th><th>商户</th><th>分类</th><th>状态</th><th class="num">金额</th><th class="num">已退款</th></tr></thead><tbody id="myPayments"></tbody></table></div></div>
+        <div id="pane-wd" hidden><div class="table-wrap"><table class="data stack"><thead><tr><th>时间</th><th>收款账户</th><th>状态</th><th>审核备注</th><th class="num">金额</th></tr></thead><tbody id="myWithdrawals"></tbody></table></div></div>
+        <div id="pane-orders" hidden><div class="table-wrap"><table class="data stack"><thead><tr><th>产品</th><th>时间</th><th>方向</th><th class="num">数量（份）</th><th class="num">成交价</th><th class="num">成交额</th><th class="num">已实现盈亏</th><th>状态</th></tr></thead><tbody id="orderBody"></tbody></table></div></div>
       </div>
     </section>
 
     <!-- ============ 投资 ============ -->
     <section id="view-invest" class="view" hidden>
       <div class="page-head"><div><h1>投资</h1><p id="riskLine">尚未完成风险测评。</p></div>
-        <div class="page-actions"><button class="btn" onclick="openGoals()">目标</button><button class="btn" onclick="openRebalance()">再平衡</button><button class="btn" onclick="openRiskQuiz()">风险测评</button></div>
+        <div class="page-actions"><button class="btn" onclick="openGoals()"><i data-icon="target" data-size="16"></i>目标</button><button class="btn" onclick="openRebalance()"><i data-icon="scale" data-size="16"></i>再平衡</button><button class="btn" onclick="openRiskQuiz()"><i data-icon="shield-check" data-size="16"></i>风险测评</button></div>
       </div>
+      <div class="row mobile-only" style="margin:-8px 0 var(--space-4)"><button class="btn sm" onclick="openRiskQuiz()">风险测评</button><button class="btn sm" onclick="openRebalance()">再平衡</button><button class="btn sm" onclick="openGoals()">目标</button></div>
       <div class="card">
-        <div class="card-head"><div><h2>持仓</h2><div class="sub">成本按先进先出（FIFO）核算；均价仅供参考</div></div><span class="hint" id="realizedLine"></span></div>
-        <div class="table-wrap short"><table class="data"><thead><tr><th>产品</th><th>类型</th><th class="num">数量（份）</th><th class="num">成本均价</th><th class="num">现价</th><th class="num">市值</th><th class="num">未实现盈亏</th><th class="num">收益率</th><th class="num">占比</th><th>近 14 日</th><th class="act"></th></tr></thead><tbody id="holdBody"></tbody></table></div>
+        <div class="card-head"><div><h2>持仓</h2><div class="sub">成本按先进先出（FIFO）核算</div></div><span class="hint" id="realizedLine"></span></div>
+        <div class="table-wrap short"><table class="data stack"><thead><tr><th>产品</th><th>类型</th><th class="num">数量（份）</th><th class="num">成本均价</th><th class="num">现价</th><th class="num">市值</th><th class="num">未实现盈亏</th><th class="num">收益率</th><th class="num">占比</th><th>近 14 日</th><th class="act"></th></tr></thead><tbody id="holdBody"></tbody></table></div>
       </div>
       <div class="card" id="fdCard" hidden>
-        <div class="card-head"><div><h2>定存</h2><div class="sub">到期自动兑付本金与利息；提前支取按已存天数计息</div></div></div>
-        <div class="table-wrap short"><table class="data"><thead><tr><th>产品</th><th>状态</th><th>到期日</th><th class="num">本金</th><th class="num">年化利率</th><th class="num">已计利息</th><th class="act"></th></tr></thead><tbody id="fdBody"></tbody></table></div>
+        <div class="card-head"><div><h2>定存</h2><div class="sub">到期自动兑付；提前支取按已存天数计息</div></div></div>
+        <div class="table-wrap short"><table class="data stack"><thead><tr><th>产品</th><th>状态</th><th>到期日</th><th class="num">本金</th><th class="num">年化利率</th><th class="num">已计利息</th><th class="act"></th></tr></thead><tbody id="fdBody"></tbody></table></div>
       </div>
       <div class="card">
         <div class="card-head"><div><h2>产品</h2><div class="sub">全部为模拟产品与模拟价格</div></div></div>
         <div class="toolbar"><div class="toolbar-left">
-          <input id="prodQ" class="search" type="search" oninput="renderProducts()" placeholder="搜索产品名称" aria-label="搜索产品">
+          <span class="search-wrap"><i data-icon="search" data-size="16"></i><input id="prodQ" class="search" type="search" oninput="renderProducts()" placeholder="搜索产品名称" aria-label="搜索产品"></span>
           <select id="prodType" onchange="renderProducts()" aria-label="类型"><option value="">全部类型</option><option value="STOCK">股票</option><option value="ETF">ETF</option><option value="FUND">基金</option><option value="GOLD">黄金</option><option value="FIXED_DEPOSIT">定存</option></select>
-          <select id="prodRisk" onchange="renderProducts()" aria-label="风险等级"><option value="">全部风险等级</option><option>R1</option><option>R2</option><option>R3</option><option>R4</option><option>R5</option></select>
+          <select id="prodRisk" onchange="renderProducts()" aria-label="风险等级"><option value="">全部风险</option><option>R1</option><option>R2</option><option>R3</option><option>R4</option><option>R5</option></select>
         </div></div>
-        <div class="table-wrap"><table class="data"><thead><tr><th>产品</th><th>类型</th><th>风险等级</th><th class="num">现价</th><th class="num">日涨跌</th><th>近 14 日</th><th class="act"></th></tr></thead><tbody id="productBody"></tbody></table></div>
+        <div class="table-wrap"><table class="data stack"><thead><tr><th>产品</th><th>类型</th><th>风险等级</th><th class="num">现价</th><th class="num">日涨跌</th><th>近 14 日</th><th class="act"></th></tr></thead><tbody id="productBody"></tbody></table></div>
       </div>
       <div class="card">
         <div class="card-head"><div><h2>价格提醒</h2><div class="sub">仅在应用内显示；同一产品同一条件只能有一个生效提醒</div></div></div>
@@ -188,20 +197,37 @@
           <select id="alertCond" aria-label="条件"><option value="ABOVE">价格高于</option><option value="BELOW">价格低于</option><option value="DAY_CHANGE">日涨跌幅超过</option></select>
           <input id="alertThreshold" inputmode="decimal" placeholder="阈值：USD 或 %" aria-label="阈值" style="width:140px">
           <select id="alertMode" aria-label="频率"><option value="ONCE">触发一次</option><option value="RECURRING">每次触发</option></select>
-          <button class="btn sm">添加提醒</button>
+          <button class="btn sm"><i data-icon="bell" data-size="16"></i>添加提醒</button>
         </div></form>
-        <div class="table-wrap short"><table class="data"><thead><tr><th>产品</th><th>条件</th><th class="num">阈值</th><th>频率</th><th>状态</th><th class="act"></th></tr></thead><tbody id="alertBody"></tbody></table></div>
+        <div class="table-wrap short"><table class="data stack"><thead><tr><th>产品</th><th>条件</th><th class="num">阈值</th><th>频率</th><th>状态</th><th class="act"></th></tr></thead><tbody id="alertBody"></tbody></table></div>
       </div>
     </section>
 
-    <!-- ============ 设置（注释式分栏） ============ -->
+    <!-- ============ 我的 ============ -->
     <section id="view-settings" class="view" hidden>
-      <div class="page-head"><div><h1>设置</h1><p>账户安全、数据与演示环境</p></div></div>
+      <div class="profile">
+        <span class="avatar lg" id="profileAvatar"></span>
+        <div style="flex:1;min-width:0"><h1 id="profileName"></h1><p id="profileEmail"></p></div>
+        <button class="btn" onclick="doLogout()"><i data-icon="log-out" data-size="16"></i>退出</button>
+      </div>
+      <div class="section">
+        <div class="section-info"><h2>外观</h2><p>选择浅色、深色，或跟随系统设置。</p></div>
+        <div class="card"><div class="card-body"><div class="segmented" id="themeSeg" role="group" aria-label="外观">
+          <button data-theme-opt="system" onclick="setTheme('system')">跟随系统</button><button data-theme-opt="light" onclick="setTheme('light')">浅色</button><button data-theme-opt="dark" onclick="setTheme('dark')">深色</button>
+        </div></div></div>
+      </div>
+      <div class="section browser-only" id="installSection">
+        <div class="section-info"><h2>安装到主屏幕</h2><p>像 App 一样从主屏幕打开 SpacePay，全屏显示，启动更快。</p></div>
+        <div class="card"><div class="card-body">
+          <button class="btn primary" id="installBtn" onclick="installApp()" hidden><i data-icon="smartphone" data-size="16"></i>安装 SpacePay</button>
+          <p class="hint" id="installHint">在 Safari 中点「分享」→「添加到主屏幕」；在 Chrome 中打开菜单 →「安装应用」。</p>
+        </div></div>
+      </div>
       <div class="section">
         <div class="section-info"><h2>支付 PIN</h2><p>转账、付款、提现和下单前需要输入 6 位数字 PIN。PIN 与登录密码分开保存。</p></div>
         <div class="card"><div class="card-body">
           <form id="pinSetForm" class="form-narrow" onsubmit="event.preventDefault(); setPin()" hidden>
-            <p class="notice info" style="margin-bottom:var(--space-4)">尚未设置支付 PIN，设置后才能进行资金操作。</p>
+            <p class="notice info" style="margin-bottom:var(--space-4)"><i data-icon="lock-keyhole" data-size="18"></i>还没有设置支付 PIN，设置后才能转账和付款。</p>
             <label class="field"><span>新 PIN</span><input id="pinNew" type="password" inputmode="numeric" maxlength="6" autocomplete="off"><small>6 位数字</small></label>
             <label class="field"><span>登录密码</span><input id="pinPw" type="password" autocomplete="current-password"><small>用于验证身份</small></label>
             <div class="form-actions"><button class="btn primary">设置 PIN</button></div>
@@ -227,12 +253,12 @@
       </div>
       <div class="section">
         <div class="section-info"><h2>安全日志</h2><p>最近 50 条登录、资金与安全设置记录。发现不是本人的操作，请立即修改密码与 PIN。</p></div>
-        <div class="card"><div class="table-wrap short"><table class="data"><thead><tr><th>时间</th><th>事件</th><th>详情</th><th>IP</th></tr></thead><tbody id="auditBody"></tbody></table></div></div>
+        <div class="card"><div class="table-wrap short"><table class="data stack"><thead><tr><th>事件</th><th>时间</th><th>详情</th><th>IP</th></tr></thead><tbody id="auditBody"></tbody></table></div></div>
       </div>
       <div class="section">
         <div class="section-info"><h2>数据</h2><p>导出本账户的全部记录（JSON，不含密码与 PIN 哈希），或为数据库创建一份热备份。</p></div>
         <div class="card"><div class="card-body">
-          <div class="row"><button class="btn" onclick="exportData()">导出我的数据</button><button class="btn" onclick="backupDb()">备份数据库</button></div>
+          <div class="row"><button class="btn" onclick="exportData()"><i data-icon="download" data-size="16"></i>导出我的数据</button><button class="btn" onclick="backupDb()">备份数据库</button></div>
           <p class="msg" id="backupMsg"></p>
           <pre id="exportBox" class="mono" hidden style="margin:var(--space-3) 0 0;max-height:240px;overflow:auto;white-space:pre-wrap;word-break:break-all"></pre>
         </div></div>
@@ -257,15 +283,15 @@
     <section id="view-c-overview" class="view" hidden>
       <div class="page-head"><div><h1>运营概览</h1><p id="cPeriod">—</p></div></div>
       <div class="kpis">
-        <div class="kpi"><div class="kpi-label">用户</div><div class="kpi-value" id="cUsers">—</div><div class="kpi-note" id="cFrozen">—</div></div>
-        <div class="kpi"><div class="kpi-label">钱包余额合计</div><div class="kpi-value" id="cWallet">—</div><div class="kpi-note">全部用户，实时</div></div>
-        <div class="kpi"><div class="kpi-label">净流入</div><div class="kpi-value" id="cFlow">—</div><div class="kpi-note" id="cFlowNote">—</div></div>
-        <div class="kpi"><div class="kpi-label">待审核提现</div><div class="kpi-value" id="cPending">—</div><div class="kpi-note" id="cPendingAmt">—</div></div>
+        <div class="kpi"><div class="kpi-label"><i data-icon="users" data-size="16"></i>用户</div><div class="kpi-value" id="cUsers">—</div><div class="kpi-note" id="cFrozen">—</div></div>
+        <div class="kpi"><div class="kpi-label"><i data-icon="wallet" data-size="16"></i>钱包余额合计</div><div class="kpi-value" id="cWallet">—</div><div class="kpi-note">全部用户，实时</div></div>
+        <div class="kpi"><div class="kpi-label"><i data-icon="arrow-left-right" data-size="16"></i>净流入</div><div class="kpi-value" id="cFlow">—</div><div class="kpi-note" id="cFlowNote">—</div></div>
+        <div class="kpi"><div class="kpi-label"><i data-icon="hourglass" data-size="16"></i>待审核提现</div><div class="kpi-value" id="cPending">—</div><div class="kpi-note" id="cPendingAmt">—</div></div>
       </div>
       <div class="card">
-        <div class="card-head"><div><h2>每日收入与支出</h2><div class="sub">单位 USD；口径与钱包页一致</div></div><button class="btn sm" onclick="showView('c-withdrawals')" id="cPendingBtn" hidden>处理待审核提现</button></div>
+        <div class="card-head"><div><h2>每日收入与支出</h2><div class="sub">单位 USD；口径与用户端交易页一致</div></div><button class="btn sm" onclick="showView('c-withdrawals')" id="cPendingBtn" hidden>处理待审核提现</button></div>
         <div class="card-body">
-          <div class="chart-head"><div class="legend"><span><i class="sq l1"></i>收入</span><span><i class="sq l2"></i>支出</span></div><span class="axis-note">横轴：日期（UTC）　纵轴：金额（USD）</span></div>
+          <div class="chart-head"><div class="legend"><span><i class="sq l1"></i>收入</span><span><i class="sq l2"></i>支出</span></div><span class="axis-note">横轴：日期（UTC）· 纵轴：USD</span></div>
           <div id="flowChart" class="chart"></div>
         </div>
         <div class="card-foot"><span id="flowPeriod">统计周期：—</span>
@@ -273,27 +299,24 @@
       </div>
     </section>
 
-    <!-- ============ 运营后台：交易 ============ -->
     <section id="view-c-tx" class="view" hidden>
       <div class="page-head"><div><h1>交易</h1><p>全部用户的资金流水</p></div></div>
       <div class="card" id="adminTx"></div>
     </section>
 
-    <!-- ============ 运营后台：支付与退款 ============ -->
     <section id="view-c-payments" class="view" hidden>
       <div class="page-head"><div><h1>支付与退款</h1><p>退款金额不能超过可退余额；每次退款需二次确认并记录原因</p></div></div>
       <div class="card">
         <form class="toolbar" onsubmit="event.preventDefault(); loadAdminPayments(1)"><div class="toolbar-left">
-          <input id="cpEmail" class="search" type="search" placeholder="按用户邮箱搜索" aria-label="用户邮箱">
+          <span class="search-wrap"><i data-icon="search" data-size="16"></i><input id="cpEmail" class="search" type="search" placeholder="按用户邮箱搜索" aria-label="用户邮箱"></span>
           <select id="cpStatus" aria-label="状态" onchange="loadAdminPayments(1)"><option value="">全部状态</option><option value="SUCCEEDED">成功</option><option value="PARTIALLY_REFUNDED">部分退款</option><option value="REFUNDED">已退款</option></select>
           <button class="btn sm">查询</button>
         </div></form>
-        <div class="table-wrap"><table class="data"><thead><tr><th>编号</th><th>时间</th><th>用户</th><th>商户</th><th>状态</th><th class="num">支付金额</th><th class="num">已退款</th><th class="num">可退</th><th class="act"></th></tr></thead><tbody id="cpBody"></tbody></table></div>
+        <div class="table-wrap"><table class="data stack"><thead><tr><th>编号</th><th>时间</th><th>用户</th><th>商户</th><th>状态</th><th class="num">支付金额</th><th class="num">已退款</th><th class="num">可退</th><th class="act"></th></tr></thead><tbody id="cpBody"></tbody></table></div>
         <div class="pager" id="cpPager"></div>
       </div>
     </section>
 
-    <!-- ============ 运营后台：提现审核 ============ -->
     <section id="view-c-withdrawals" class="view" hidden>
       <div class="page-head"><div><h1>提现审核</h1><p>审核人不能处理自己提交的申请；驳回时资金原路退回用户钱包</p></div></div>
       <div class="card">
@@ -303,106 +326,119 @@
           <button class="tab" data-s="FAILED" onclick="setWStatus('FAILED')">已驳回</button>
           <button class="tab" data-s="" onclick="setWStatus('')">全部</button>
         </div>
-        <div class="table-wrap"><table class="data"><thead><tr><th>编号</th><th>申请时间</th><th>用户</th><th>收款账户</th><th>状态</th><th>审核备注</th><th class="num">金额</th><th class="act"></th></tr></thead><tbody id="cwBody"></tbody></table></div>
+        <div class="table-wrap"><table class="data stack"><thead><tr><th>编号</th><th>申请时间</th><th>用户</th><th>收款账户</th><th>状态</th><th>审核备注</th><th class="num">金额</th><th class="act"></th></tr></thead><tbody id="cwBody"></tbody></table></div>
       </div>
     </section>
 
-    <!-- ============ 运营后台：用户 ============ -->
     <section id="view-c-users" class="view" hidden>
       <div class="page-head"><div><h1>用户</h1><p>冻结后账户不能转账、付款、提现、下单，也不能接收转账</p></div></div>
       <div class="card">
         <form class="toolbar" onsubmit="event.preventDefault(); loadAdminUsers(1)"><div class="toolbar-left">
-          <input id="cuQ" class="search" type="search" placeholder="搜索邮箱或昵称" aria-label="搜索用户">
+          <span class="search-wrap"><i data-icon="search" data-size="16"></i><input id="cuQ" class="search" type="search" placeholder="搜索邮箱或昵称" aria-label="搜索用户"></span>
           <select id="cuStatus" aria-label="状态" onchange="loadAdminUsers(1)"><option value="">全部状态</option><option value="ACTIVE">正常</option><option value="FROZEN">已冻结</option></select>
           <button class="btn sm">查询</button>
         </div></form>
-        <div class="table-wrap"><table class="data"><thead><tr><th>编号</th><th>邮箱</th><th>昵称</th><th>角色</th><th>状态</th><th class="num">余额</th><th>注册时间</th><th class="act"></th></tr></thead><tbody id="cuBody"></tbody></table></div>
+        <div class="table-wrap"><table class="data stack"><thead><tr><th>编号</th><th>邮箱</th><th>昵称</th><th>角色</th><th>状态</th><th class="num">余额</th><th>注册时间</th><th class="act"></th></tr></thead><tbody id="cuBody"></tbody></table></div>
         <div class="pager" id="cuPager"></div>
       </div>
     </section>
 
-    <!-- ============ 运营后台：对账 ============ -->
     <section id="view-c-recon" class="view" hidden>
-      <div class="page-head"><div><h1>对账</h1><p>核对账本、钱包余额与流水是否一致</p></div><div class="page-actions"><button class="btn primary" onclick="runRecon()" id="reconBtn">运行对账</button></div></div>
+      <div class="page-head"><div><h1>对账</h1><p>核对账本、钱包余额与流水是否一致</p></div><div class="page-actions" style="display:flex"><button class="btn primary" onclick="runRecon()" id="reconBtn"><i data-icon="scale" data-size="16"></i>运行对账</button></div></div>
       <div id="reconResult">
         <div class="card"><div class="empty-state">
+          <span class="empty-icon"><i data-icon="scale"></i></span>
           <h3>尚未运行对账</h3>
           <p>对账会逐项检查：每个凭证借贷平衡；每个钱包余额等于账本余额，也等于最后一笔流水的交易后余额；转账清算科目为零；提现在途金额等于待审核提现合计。运行记录会写入操作日志。</p>
         </div></div>
       </div>
     </section>
 
-    <!-- ============ 运营后台：操作日志 ============ -->
     <section id="view-c-logs" class="view" hidden>
       <div class="page-head"><div><h1>操作日志</h1><p>运营与资金关键操作的完整记录，只追加，不可修改</p></div></div>
       <div class="card">
         <div class="toolbar"><div class="toolbar-left"><select id="clAction" onchange="loadOpLogs(1)" aria-label="操作类型"><option value="">全部操作</option></select></div></div>
-        <div class="table-wrap"><table class="data"><thead><tr><th>时间</th><th>操作人</th><th>操作</th><th>对象</th><th class="num">金额</th><th>原因 / 说明</th><th>结果</th><th>请求编号</th></tr></thead><tbody id="clBody"></tbody></table></div>
+        <div class="table-wrap"><table class="data stack"><thead><tr><th>操作</th><th>时间</th><th>操作人</th><th>对象</th><th class="num">金额</th><th>原因 / 说明</th><th>结果</th><th>请求编号</th></tr></thead><tbody id="clBody"></tbody></table></div>
         <div class="pager" id="clPager"></div>
       </div>
     </section>
   </main>
 </div>
 
-<nav class="bottombar" id="bottomNav" aria-label="移动导航" hidden>
-  <button class="nav-item" data-view="home" onclick="showView('home')">总览</button>
-  <button class="nav-item" data-view="wallet" onclick="showView('wallet')">钱包</button>
-  <button class="nav-item" data-view="activity" onclick="showView('activity')">交易</button>
-  <button class="nav-item" data-view="invest" onclick="showView('invest')">投资</button>
-  <button class="nav-item" data-view="settings" onclick="showView('settings')">设置</button>
+<!-- 手机底部标签栏：首页 · 交易 · 转账 · 投资 · 我的 -->
+<nav class="tabbar" id="tabbar" aria-label="主导航" hidden>
+  <button class="tab-item" data-view="home" onclick="showView('home')"><i data-icon="house" data-size="22"></i>首页</button>
+  <button class="tab-item" data-view="activity" onclick="showView('activity')"><i data-icon="arrow-left-right" data-size="22"></i>交易</button>
+  <button class="tab-item cta" onclick="openTransfer()" aria-label="转账"><span class="cta-circle"><i data-icon="send" data-size="20"></i></span>转账</button>
+  <button class="tab-item" data-view="invest" onclick="showView('invest')"><i data-icon="chart-line" data-size="22"></i>投资</button>
+  <button class="tab-item" data-view="settings" onclick="showView('settings')"><i data-icon="user" data-size="22"></i>我的</button>
 </nav>
 
-<!-- ============ 弹窗：资金操作 ============ -->
-<div id="topupModal" class="modal" hidden><form class="modal-card" onsubmit="event.preventDefault(); doTopup()">
-  <div class="modal-head"><div><h2>充值</h2><p class="hint">演示充值，资金为虚拟资金</p></div><button type="button" class="close" onclick="closeModal('topupModal')" aria-label="关闭">×</button></div>
-  <div class="modal-body"><label class="field"><span>金额（USD）</span><input id="topupAmount" inputmode="decimal" placeholder="0.00"><small>单次不超过 $500.00</small></label><p class="msg" id="topupMsg"></p></div>
-  <div class="modal-foot"><button type="button" class="btn" onclick="closeModal('topupModal')">取消</button><button class="btn primary">充值</button></div></form></div>
-
+<!-- ============ 弹窗 / 底部抽屉：资金操作 ============ -->
 <div id="transferModal" class="modal" hidden><form class="modal-card" onsubmit="event.preventDefault(); doTransfer()">
-  <div class="modal-head"><div><h2>转账</h2><p class="hint">即时到账，不可撤回</p></div><button type="button" class="close" onclick="closeModal('transferModal')" aria-label="关闭">×</button></div>
+  <div class="sheet-handle"></div>
+  <div class="modal-head"><div><h2>转账</h2><p class="hint">即时到账，不可撤回</p></div><button type="button" class="close" onclick="closeModal('transferModal')" aria-label="关闭"><i data-icon="x" data-size="18"></i></button></div>
   <div class="modal-body">
-    <label class="field"><span>收款人邮箱</span><input id="trEmail" type="email"></label>
+    <div class="amount-field"><span class="cur">$</span><input id="trAmount" inputmode="decimal" placeholder="0.00" aria-label="金额" autocomplete="off"></div>
+    <p class="amount-meta" id="trAvail">可用余额 —</p>
+    <div class="chips-row" data-for="trAmount"><button type="button" class="chip-btn" data-v="10">$10</button><button type="button" class="chip-btn" data-v="20">$20</button><button type="button" class="chip-btn" data-v="50">$50</button><button type="button" class="chip-btn" data-v="100">$100</button></div>
+    <label class="field"><span>收款人邮箱</span><input id="trEmail" type="email" inputmode="email" autocomplete="email" placeholder="name@example.com"></label>
     <div class="two-col">
-      <label class="field"><span>金额（USD）</span><input id="trAmount" inputmode="decimal" placeholder="0.00"></label>
+      <label class="field"><span>备注（选填）</span><input id="trNote" maxlength="100" placeholder="例如：午餐 AA"></label>
       <label class="field"><span>支付 PIN</span><input id="trPin" type="password" inputmode="numeric" maxlength="6" autocomplete="off"></label>
     </div>
-    <label class="field"><span>备注（选填）</span><input id="trNote" maxlength="100"></label>
     <p class="msg" id="trMsg"></p></div>
-  <div class="modal-foot"><button type="button" class="btn" onclick="closeModal('transferModal')">取消</button><button class="btn primary" id="trBtn">转账</button></div></form></div>
+  <div class="modal-foot"><button type="button" class="btn" onclick="closeModal('transferModal')">取消</button><button class="btn primary" id="trBtn">确认转账</button></div></form></div>
 
 <div id="payModal" class="modal" hidden><form class="modal-card" onsubmit="event.preventDefault(); doPay()">
-  <div class="modal-head"><div><h2>付款</h2><p class="hint">向商户付款或缴费</p></div><button type="button" class="close" onclick="closeModal('payModal')" aria-label="关闭">×</button></div>
+  <div class="sheet-handle"></div>
+  <div class="modal-head"><div><h2>付款</h2><p class="hint">向商户付款或缴费</p></div><button type="button" class="close" onclick="closeModal('payModal')" aria-label="关闭"><i data-icon="x" data-size="18"></i></button></div>
   <div class="modal-body">
-    <div class="two-col">
-      <label class="field"><span>商户</span><input id="payMerchant" maxlength="80"></label>
+    <div class="amount-field"><span class="cur">$</span><input id="payAmount" inputmode="decimal" placeholder="0.00" aria-label="金额" autocomplete="off"></div>
+    <div class="two-col" style="margin-top:var(--space-3)">
+      <label class="field"><span>商户</span><input id="payMerchant" maxlength="80" placeholder="例如：蓝湾咖啡"></label>
       <label class="field"><span>分类</span><select id="payCategory"><option>购物</option><option>餐饮</option><option>交通</option><option>生活缴费</option><option>娱乐</option><option>其他</option></select></label>
-      <label class="field"><span>金额（USD）</span><input id="payAmount" inputmode="decimal" placeholder="0.00"></label>
-      <label class="field"><span>支付 PIN</span><input id="payPin" type="password" inputmode="numeric" maxlength="6" autocomplete="off"></label>
     </div>
+    <label class="field"><span>支付 PIN</span><input id="payPin" type="password" inputmode="numeric" maxlength="6" autocomplete="off"></label>
     <p class="msg" id="payMsg"></p></div>
-  <div class="modal-foot"><button type="button" class="btn" onclick="closeModal('payModal')">取消</button><button class="btn primary" id="payBtn">付款</button></div></form></div>
+  <div class="modal-foot"><button type="button" class="btn" onclick="closeModal('payModal')">取消</button><button class="btn primary" id="payBtn">确认付款</button></div></form></div>
+
+<div id="topupModal" class="modal" hidden><form class="modal-card" onsubmit="event.preventDefault(); doTopup()">
+  <div class="sheet-handle"></div>
+  <div class="modal-head"><div><h2>充值</h2><p class="hint">演示充值，单次不超过 $500.00</p></div><button type="button" class="close" onclick="closeModal('topupModal')" aria-label="关闭"><i data-icon="x" data-size="18"></i></button></div>
+  <div class="modal-body">
+    <div class="amount-field"><span class="cur">$</span><input id="topupAmount" inputmode="decimal" placeholder="0.00" aria-label="金额" autocomplete="off"></div>
+    <div class="chips-row" data-for="topupAmount"><button type="button" class="chip-btn" data-v="50">$50</button><button type="button" class="chip-btn" data-v="100">$100</button><button type="button" class="chip-btn" data-v="200">$200</button><button type="button" class="chip-btn" data-v="500">$500</button></div>
+    <p class="msg" id="topupMsg"></p></div>
+  <div class="modal-foot"><button type="button" class="btn" onclick="closeModal('topupModal')">取消</button><button class="btn primary">充值</button></div></form></div>
 
 <div id="withdrawModal" class="modal" hidden><form class="modal-card" onsubmit="event.preventDefault(); doWithdraw()">
-  <div class="modal-head"><div><h2>提现</h2><p class="hint">模拟出款，提交后由财务审核</p></div><button type="button" class="close" onclick="closeModal('withdrawModal')" aria-label="关闭">×</button></div>
+  <div class="sheet-handle"></div>
+  <div class="modal-head"><div><h2>提现</h2><p class="hint">模拟出款，提交后由财务审核</p></div><button type="button" class="close" onclick="closeModal('withdrawModal')" aria-label="关闭"><i data-icon="x" data-size="18"></i></button></div>
   <div class="modal-body">
-    <dl class="kv" style="margin-bottom:var(--space-4)"><dt>可用余额</dt><dd id="wdAvail">—</dd><dt>单笔上限</dt><dd>$500.00</dd></dl>
+    <div class="amount-field"><span class="cur">$</span><input id="wdAmount" inputmode="decimal" placeholder="0.00" aria-label="金额" autocomplete="off"></div>
+    <p class="amount-meta" id="wdAvail">可用余额 —　单笔上限 $500.00</p>
     <div class="two-col">
-      <label class="field"><span>金额（USD）</span><input id="wdAmount" inputmode="decimal" placeholder="0.00"></label>
       <label class="field"><span>收款银行卡尾号</span><input id="wdDest" inputmode="numeric" maxlength="4" placeholder="4 位数字"></label>
+      <label class="field"><span>支付 PIN</span><input id="wdPin" type="password" inputmode="numeric" maxlength="6" autocomplete="off"></label>
     </div>
-    <label class="field"><span>支付 PIN</span><input id="wdPin" type="password" inputmode="numeric" maxlength="6" autocomplete="off"></label>
     <p class="msg" id="wdMsg"></p></div>
   <div class="modal-foot"><button type="button" class="btn" onclick="closeModal('withdrawModal')">取消</button><button class="btn primary">下一步</button></div></form></div>
 
-<!-- 二次确认（服务端返回 428 时显示服务端生成的摘要） -->
+<div id="txDetailModal" class="modal" hidden><div class="modal-card">
+  <div class="sheet-handle"></div>
+  <div class="modal-head"><h2>交易详情</h2><button type="button" class="close" onclick="closeModal('txDetailModal')" aria-label="关闭"><i data-icon="x" data-size="18"></i></button></div>
+  <div class="modal-body"><div class="detail-head" id="txDetailHead"></div><dl class="kv" id="txDetailBody"></dl></div></div></div>
+
 <div id="confirmModal" class="modal" hidden><div class="modal-card" role="alertdialog" aria-labelledby="confirmTitle">
-  <div class="modal-head"><h2 id="confirmTitle">确认操作</h2><button type="button" class="close" onclick="cancelConfirm()" aria-label="关闭">×</button></div>
+  <div class="sheet-handle"></div>
+  <div class="modal-head"><h2 id="confirmTitle">确认操作</h2><button type="button" class="close" onclick="cancelConfirm()" aria-label="关闭"><i data-icon="x" data-size="18"></i></button></div>
   <div class="modal-body"><dl class="kv" id="confirmBody"></dl><p class="hint" style="margin-top:var(--space-3)">请核对以上信息。确认后立即执行，并记入操作日志。确认有效期 5 分钟。</p><p class="msg" id="confirmMsg"></p></div>
   <div class="modal-foot"><button class="btn" onclick="cancelConfirm()">返回修改</button><button class="btn primary" id="confirmBtn" onclick="acceptConfirm()">确认</button></div></div></div>
 
-<!-- 运营后台：退款 / 冻结 / 驳回等需要原因的操作 -->
 <div id="opModal" class="modal" hidden><form class="modal-card" onsubmit="event.preventDefault(); submitOp()">
-  <div class="modal-head"><h2 id="opTitle">操作</h2><button type="button" class="close" onclick="closeModal('opModal')" aria-label="关闭">×</button></div>
+  <div class="sheet-handle"></div>
+  <div class="modal-head"><h2 id="opTitle">操作</h2><button type="button" class="close" onclick="closeModal('opModal')" aria-label="关闭"><i data-icon="x" data-size="18"></i></button></div>
   <div class="modal-body">
     <dl class="kv" id="opInfo" style="margin-bottom:var(--space-4)"></dl>
     <label class="field" id="opAmountField"><span id="opAmountLabel">金额（USD）</span><input id="opAmount" inputmode="decimal"></label>
@@ -411,9 +447,10 @@
     <p class="msg" id="opMsg"></p></div>
   <div class="modal-foot"><button type="button" class="btn" onclick="closeModal('opModal')">取消</button><button class="btn primary" id="opBtn">下一步</button></div></form></div>
 
-<!-- ============ 弹窗：投资 ============ -->
+<!-- ============ 投资弹窗 ============ -->
 <div id="productModal" class="modal" hidden><form class="modal-card wide" onsubmit="event.preventDefault(); previewOrder()">
-  <div class="modal-head"><div><h2 id="pmName">产品</h2><p class="hint" id="pmMeta"></p></div><button type="button" class="close" onclick="closeModal('productModal')" aria-label="关闭">×</button></div>
+  <div class="sheet-handle"></div>
+  <div class="modal-head"><div><h2 id="pmName">产品</h2><p class="hint" id="pmMeta"></p></div><button type="button" class="close" onclick="closeModal('productModal')" aria-label="关闭"><i data-icon="x" data-size="18"></i></button></div>
   <div class="modal-body">
     <div class="chart-head"><div class="legend"><span><i class="l1"></i>价格（USD）</span></div><span class="axis-note">近 30 个模拟日</span></div>
     <div id="pmChart" class="chart"></div>
@@ -427,38 +464,44 @@
   <div class="modal-foot"><button type="button" class="btn" onclick="closeModal('productModal')">取消</button><button class="btn primary">预览订单</button></div></form></div>
 
 <div id="reviewModal" class="modal" hidden><form class="modal-card" onsubmit="event.preventDefault(); confirmOrder()">
-  <div class="modal-head"><div><h2>核对订单</h2><p class="hint">按确认时的模拟价格立即成交</p></div><button type="button" class="close" onclick="closeModal('reviewModal')" aria-label="关闭">×</button></div>
+  <div class="sheet-handle"></div>
+  <div class="modal-head"><div><h2>核对订单</h2><p class="hint">按确认时的模拟价格立即成交</p></div><button type="button" class="close" onclick="closeModal('reviewModal')" aria-label="关闭"><i data-icon="x" data-size="18"></i></button></div>
   <div class="modal-body"><dl class="kv" id="reviewBody"></dl><div id="reviewWarn"></div>
     <label class="field" style="margin-top:var(--space-4)"><span>支付 PIN</span><input id="reviewPin" type="password" inputmode="numeric" maxlength="6" autocomplete="off"></label>
     <p class="msg" id="reviewMsg"></p></div>
-  <div class="modal-foot"><button type="button" class="btn" onclick="closeModal('reviewModal'); openModal('productModal')">返回修改</button><button class="btn primary" id="confirmOrderBtn">确认</button></div></form></div>
+  <div class="modal-foot"><button type="button" class="btn" onclick="closeModal('reviewModal'); openSheet('productModal')">返回修改</button><button class="btn primary" id="confirmOrderBtn">确认</button></div></form></div>
 
 <div id="receiptModal" class="modal" hidden><div class="modal-card">
-  <div class="modal-head"><div><h2>成交回单</h2><p class="hint">可在「交易记录 → 投资订单」中查看</p></div></div>
+  <div class="sheet-handle"></div>
+  <div class="modal-head"><div><h2>成交回单</h2><p class="hint">可在「交易 → 投资订单」中查看</p></div></div>
   <div class="modal-body"><dl class="kv" id="receiptBody"></dl></div>
   <div class="modal-foot"><button class="btn primary" onclick="closeModal('receiptModal'); refreshCurrent()">完成</button></div></div></div>
 
 <div id="riskModal" class="modal" hidden><div class="modal-card wide">
-  <div class="modal-head"><div><h2>风险测评</h2><p class="hint">自测问卷，结果用于生成示例配置，不构成投资建议</p></div><button class="close" onclick="closeModal('riskModal')" aria-label="关闭">×</button></div>
+  <div class="sheet-handle"></div>
+  <div class="modal-head"><div><h2>风险测评</h2><p class="hint">自测问卷，结果用于生成示例配置，不构成投资建议</p></div><button class="close" onclick="closeModal('riskModal')" aria-label="关闭"><i data-icon="x" data-size="18"></i></button></div>
   <div class="modal-body"><div id="quizBox"></div><div id="quizResult"></div></div>
   <div class="modal-foot"><button class="btn" onclick="closeModal('riskModal')">关闭</button><button class="btn primary" onclick="submitQuiz()">提交</button></div></div></div>
 
 <div id="rebalanceModal" class="modal" hidden><div class="modal-card wide">
-  <div class="modal-head"><div><h2>再平衡</h2><p class="hint">偏离超过 min(5 个百分点, 目标权重 × 25%) 时建议调整</p></div><button class="close" onclick="closeModal('rebalanceModal')" aria-label="关闭">×</button></div>
+  <div class="sheet-handle"></div>
+  <div class="modal-head"><div><h2>再平衡</h2><p class="hint">偏离超过 min(5 个百分点, 目标权重 × 25%) 时建议调整</p></div><button class="close" onclick="closeModal('rebalanceModal')" aria-label="关闭"><i data-icon="x" data-size="18"></i></button></div>
   <div class="modal-body"><div id="rebalanceBody"></div>
     <label class="field" style="margin-top:var(--space-4);max-width:var(--form-w)"><span>支付 PIN</span><input id="rebPin" type="password" inputmode="numeric" maxlength="6" autocomplete="off"><small>执行建议交易时需要</small></label><p class="msg" id="rebMsg"></p></div>
   <div class="modal-foot"><button class="btn" onclick="closeModal('rebalanceModal')">关闭</button><button class="btn primary" id="rebExecBtn" onclick="executeRebalance()">执行建议交易</button></div></div></div>
 
 <div id="goalsModal" class="modal" hidden><form class="modal-card" onsubmit="event.preventDefault(); addGoal()">
-  <div class="modal-head"><div><h2>目标</h2><p class="hint">进度 = 当前总资产 ÷ 目标金额</p></div><button type="button" class="close" onclick="closeModal('goalsModal')" aria-label="关闭">×</button></div>
+  <div class="sheet-handle"></div>
+  <div class="modal-head"><div><h2>目标</h2><p class="hint">进度 = 当前总资产 ÷ 目标金额</p></div><button type="button" class="close" onclick="closeModal('goalsModal')" aria-label="关闭"><i data-icon="x" data-size="18"></i></button></div>
   <div class="modal-body"><div id="goalsList" style="margin-bottom:var(--space-4)"></div>
-    <label class="field"><span>名称</span><input id="goalName" maxlength="40"></label>
+    <label class="field"><span>名称</span><input id="goalName" maxlength="40" placeholder="例如：买一台电脑"></label>
     <div class="two-col">
       <label class="field"><span>目标金额（USD）</span><input id="goalAmount" inputmode="decimal"></label>
       <label class="field"><span>目标日期</span><input id="goalDate" type="date"></label>
     </div><p class="msg" id="goalMsg"></p></div>
   <div class="modal-foot"><button type="button" class="btn" onclick="closeModal('goalsModal')">关闭</button><button class="btn primary">添加目标</button></div></form></div>
 
+<script src="/icons.js"></script>
 <script src="/charts.js"></script>
 <script src="/app.js"></script>
 </body>
