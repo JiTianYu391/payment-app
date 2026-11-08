@@ -144,7 +144,7 @@ module.exports = function mountInvest(app, ctx) {
         simulated: true,
       };
     });
-    res.json({ ok: true, simulated_day: day, tick_note: '模拟市场：每小时推进 1 个模拟日；价格为模拟价格', items: list });
+    res.json({ ok: true, simulated_day: day, tick_note: '模拟市场：每 10 分钟推进 1 个模拟日；价格为模拟价格', items: list });
   });
 
   app.get('/api/products/:id', auth, (req, res) => {
@@ -765,7 +765,7 @@ module.exports = function mountInvest(app, ctx) {
 
   // 供 server.js /api/health 使用
   return {
-    status: () => ({ ok: true, simulated_day: prod.currentDay(db), products: prod.PRODUCTS.length, tick: '每小时推进 1 个模拟日', last_tick_at: lastTickAt, last_tick_error: lastTickError }),
+    status: () => ({ ok: true, simulated_day: prod.currentDay(db), products: prod.PRODUCTS.length, tick: '每 10 分钟推进 1 个模拟日', last_tick_at: lastTickAt, last_tick_error: lastTickError }),
     runTick,
     startTicker,
   };

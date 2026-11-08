@@ -2,7 +2,7 @@
 // 全部为模拟价格，不代表真实市场。价格路径由产品种子唯一决定，
 // 用户交易绝不改变市场路径（市场流与交易流分离，见报告 §3.2）。
 //   S(t+1) = S(t) * exp((μ − σ²/2)·Δt + σ·√Δt·Z)，Δt = 1/252，Z ~ N(0,1)
-// 模拟日推进：每小时推进 1 个模拟日（setInterval）；首次启动时预生成 30 天历史，
+// 模拟日推进：每 10 分钟推进 1 个模拟日（setInterval）；首次启动时预生成 30 天历史，
 // 因此图表 / TWR 上线即有数据。定存与货币基金不走 GBM，按固定利率计息。
 const crypto = require('crypto');
 const money = require('./money');
@@ -80,7 +80,7 @@ function holdingValue(quantityMilli, priceCents) {
   return money.mulDiv(quantityMilli, priceCents, 1000);
 }
 const HISTORY_DAYS = 30;      // 首次启动预生成的历史天数
-const TICK_MS = 60 * 60 * 1000; // 每小时推进 1 个模拟日
+const TICK_MS = 10 * 60 * 1000; // 每 10 分钟推进 1 个模拟日
 
 function seedProducts(db) {
   for (const p of PRODUCTS) {
