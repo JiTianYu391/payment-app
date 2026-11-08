@@ -217,6 +217,8 @@ module.exports = function scenario(env) {
     assert.equal(r.body.code, 'ACCOUNT_FROZEN');
     r = await t.call('POST', '/api/orders', { token: eve.token, body: { product_id: 'SIM-ETF-01', side: 'BUY', amount: '5', pin: eve.pin } });
     assert.equal(r.status, 423);
+    r = await t.call('POST', '/api/demo/reset', { token: eve.token, body: { password: eve.password } });
+    assert.equal(r.status, 423); // 冻结账户不能通过重置演示数据改动余额
     r = await t.call('POST', '/api/transfer', { token: bob.token, body: { to_email: eve.email, amount: '1', pin: bob.pin } });
     assert.equal(r.body.code, 'RECIPIENT_UNAVAILABLE');
     r = await t.confirmed('POST', url, { token: admin.token, body: { reason: '重复冻结' } });

@@ -742,7 +742,7 @@ module.exports = function mountInvest(app, ctx) {
       } catch (e2) { res.status(500).json({ ok: false, error: '备份失败：' + e2.message }); }
     }
   });
-  app.post('/api/demo/reset', auth, (req, res) => {
+  app.post('/api/demo/reset', auth, requireActive, (req, res) => {
     const password = String(req.body.password || '');
     const row = db.prepare('SELECT password_salt, password_hash FROM users WHERE id = ?').get(req.user.id);
     if (!sec.verifyPassword(password, row.password_salt, row.password_hash)) return res.status(403).json({ ok: false, error: '登录密码不正确' });
