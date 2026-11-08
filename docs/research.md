@@ -103,3 +103,34 @@
 - Max Masnick, Alignment in tables — https://maxmasnick.nfshost.com/projects/datatips/guidelines/alignment-in-tables
 
 说明：本轮检索没有拿到 Nielsen Norman Group 关于表格的原文，表格对齐结论来自上面两篇设计指南，彼此一致。
+
+---
+
+## 7. 消费级钱包体验与 PWA（第三轮）
+
+用户反馈界面「像文档站、太冷」。按选定方向（参考 Wise / Monzo / Revolut 一类消费级钱包，做成 PWA，保持原生 JS）补充调研：
+
+| 观察 | 来源 | SpacePay 采用方式 |
+| --- | --- | --- |
+| 钱包类首页把余额放在最显眼处，大号字体，下面紧跟 3–4 个最常用的快捷操作；交易历史不能被挤到首屏以下 | Wise 帮助中心「账户新外观」、Pratt IxD 对 Wise iOS 的设计评析、多个金融应用首页改版案例 | 首页改为问候语 + 大号余额卡 + 转账 / 付款 / 充值 / 提现四个圆形快捷按钮；手机上「最近交易」紧跟余额卡 |
+| Monzo 用户认可的点：商户图标 + 名称、底部标签栏导航、按天浏览交易 | Monzo 社区讨论（交易流改版、App Evolution 反馈） | 交易动态按「今天 / 昨天 / 日期」分组，每笔显示类型图标、对方或商户、时间；收入用绿色，支出用正文色 |
+| 底部标签栏承载 3–5 个一级入口；可点区域不小于 44×44pt；内容避开刘海和底部横条等安全区 | Apple HIG 的二手整理（标签栏、触控目标、安全区） | 手机底部标签栏「首页 · 交易 · 转账 · 投资 · 我的」，中间为主操作；控件至少 44px；使用 `viewport-fit=cover` 与 `env(safe-area-inset-*)` |
+| 模态底部抽屉位于遮罩之上，可带拖拽条；不要从抽屉里再打开另一个抽屉 | Material 3 Bottom sheet（Android 文档镜像）、eBay Playbook | 手机上所有弹窗改为底部抽屉，带拖拽条，可下滑或点遮罩关闭；确认层使用独立层级 |
+| Web App Manifest：`display: standalone`、多尺寸图标、`purpose: maskable`；`theme_color` 与 `<meta name="theme-color">` 一致，深浅色在 meta 中分别设置 | web.dev「Add a web app manifest」 | 新增 `manifest.webmanifest`、192/512 PNG 与 maskable 图标、Apple 触控图标；service worker 只缓存静态资源，接口请求不缓存 |
+| Lucide 图标库采用 ISC 许可证，可商用；需保留版权声明 | Lucide GitHub、lucide-static（npm） | 只内联界面用到的 55 个图标（`public/icons.js`），文件头附完整许可证文本，不增加运行时依赖 |
+
+### 来源（第三轮）
+
+- Wise Help Centre, Your Wise account has a new look — https://wise.com/help/articles/645Ve1Ah1Psi0srHGfKYmm/your-wise-account-has-a-new-look
+- Pratt IxD, Design Critique: Wise (iOS App) — https://ixd.prattsi.org/2025/09/design-critique-wise-ios-app/
+- Jar Home Page Redesign（UX Planet）— https://uxplanet.org/jar-home-page-redesign-45fec5a8a8e9
+- Monzo Community, The prospect of a redesigned transaction feed — https://community.monzo.com/t/the-prospect-of-a-redesigned-transaction-feed/124538
+- Monzo Community, App Evolution feedback megathread — https://community.monzo.com/t/app-evolution-now-in-monzo-labs/141702/62
+- Flat Studio, Neobank UX patterns for daily banking — https://www.flatstudio.co/blog/neobank-ux-patterns-daily-banking
+- web.dev, Add a web app manifest — https://web.dev/articles/add-manifest
+- Material Components Android, Bottom sheet — https://super12138.github.io/material-components-android/components/BottomSheet.html
+- eBay Playbook, Bottom sheet — https://playbook.ebay.com/design-system/components/bottom-sheet
+- iOS design guidelines（Apple HIG 的二手整理）— https://smithery.ai/skills/ehmo/ios-design-guidelines
+- Lucide — https://github.com/lucide-icons/lucide ；lucide-static — https://npmjs.com/package/lucide-static
+
+说明：Apple HIG 与 Material 3 的官方页面本轮没有直接检索到，相关数值（44pt 触控目标、抽屉拖拽条）来自二手整理，与业内通行做法一致。Wise、Monzo 的具体交易列表实现没有找到官方设计文档，结论来自其帮助中心说明和用户社区讨论。
