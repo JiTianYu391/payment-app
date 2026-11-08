@@ -1,9 +1,10 @@
 // SpacePay service worker
 // - 页面（导航请求）：网络优先，断网时回退到缓存的应用外壳；
-// - 静态资源（CSS / JS / 图标）：先返回缓存，同时后台更新（stale-while-revalidate）；
+// - 静态资源（CSS / JS / 图标）：同样网络优先，断网时才用缓存。
+//   不用 stale-while-revalidate：发布新版后它会让新 HTML 配上旧 app.js，元素对不上导致页面出错；
 // - /api/ 请求一律不经过缓存：余额与交易数据必须实时，断网时由页面提示。
 // 发布新版本时修改 VERSION，旧缓存会在 activate 时清理。
-const VERSION = 'spacepay-3.1.0';
+const VERSION = 'spacepay-3.1.1';
 const SHELL = [
   '/', '/styles.css', '/app.js', '/charts.js', '/icons.js', '/manifest.webmanifest',
   '/brand/favicon.svg', '/brand/spacepay-logo-light.svg', '/brand/spacepay-logo-dark.svg',
@@ -38,12 +39,9 @@ self.addEventListener('fetch', (event) => {
   }
 
   event.respondWith(
-    caches.open(VERSION).then((cache) => cache.match(req).then((hit) => {
-      const network = fetch(req).then((res) => {
-        if (res.ok) cache.put(req, res.clone());
-        return res;
-      }).catch(() => hit);
-      return hit || network;
-    })),
+    fetch(req).then((res) => {
+      if (res.ok) { const copy = res.clone(); caches.open(VERSION).then((c) => c.put(req, copy)); }
+      return res;
+    }).catch(() => caches.match(req)),
   );
 });
