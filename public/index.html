@@ -203,79 +203,50 @@
       </div>
     </section>
 
-    <!-- ============ 我的 ============ -->
+    <!-- ============ 我的（分组设置列表：每行显示当前状态，点开抽屉操作） ============ -->
     <section id="view-settings" class="view" hidden>
-      <div class="profile">
-        <span class="avatar lg" id="profileAvatar"></span>
-        <div style="flex:1;min-width:0"><h1 id="profileName"></h1><p id="profileEmail"></p></div>
-        <button class="btn" onclick="doLogout()"><i data-icon="log-out" data-size="16"></i>退出</button>
-      </div>
-      <div class="section">
-        <div class="section-info"><h2>外观</h2><p>选择浅色、深色，或跟随系统设置。</p></div>
-        <div class="card"><div class="card-body"><div class="segmented" id="themeSeg" role="group" aria-label="外观">
-          <button data-theme-opt="system" onclick="setTheme('system')">跟随系统</button><button data-theme-opt="light" onclick="setTheme('light')">浅色</button><button data-theme-opt="dark" onclick="setTheme('dark')">深色</button>
-        </div></div></div>
-      </div>
-      <div class="section browser-only" id="installSection">
-        <div class="section-info"><h2>安装到主屏幕</h2><p>像 App 一样从主屏幕打开 SpacePay，全屏显示，启动更快。</p></div>
-        <div class="card"><div class="card-body">
-          <button class="btn primary" id="installBtn" onclick="installApp()" hidden><i data-icon="smartphone" data-size="16"></i>安装 SpacePay</button>
-          <p class="hint" id="installHint">在 Safari 中点「分享」→「添加到主屏幕」；在 Chrome 中打开菜单 →「安装应用」。</p>
-        </div></div>
-      </div>
-      <div class="section">
-        <div class="section-info"><h2>支付 PIN</h2><p>转账、付款、提现和下单前需要输入 6 位数字 PIN。PIN 与登录密码分开保存。</p></div>
-        <div class="card"><div class="card-body">
-          <form id="pinSetForm" class="form-narrow" onsubmit="event.preventDefault(); setPin()" hidden>
-            <p class="notice info" style="margin-bottom:var(--space-4)"><i data-icon="lock-keyhole" data-size="18"></i>还没有设置支付 PIN，设置后才能转账和付款。</p>
-            <label class="field"><span>新 PIN</span><input id="pinNew" type="password" inputmode="numeric" maxlength="6" autocomplete="off"><small>6 位数字</small></label>
-            <label class="field"><span>登录密码</span><input id="pinPw" type="password" autocomplete="current-password"><small>用于验证身份</small></label>
-            <div class="form-actions"><button class="btn primary">设置 PIN</button></div>
-          </form>
-          <form id="pinChangeForm" class="form-narrow" onsubmit="event.preventDefault(); changePin()" hidden>
-            <label class="field"><span>当前 PIN</span><input id="pinOld" type="password" inputmode="numeric" maxlength="6" autocomplete="off"></label>
-            <label class="field"><span>新 PIN</span><input id="pinNew2" type="password" inputmode="numeric" maxlength="6" autocomplete="off"><small>6 位数字</small></label>
-            <div class="form-actions"><button class="btn">修改 PIN</button></div>
-          </form>
-          <p id="pinMsg" class="msg" role="status"></p>
-        </div></div>
-      </div>
-      <div class="section">
-        <div class="section-info"><h2>登录密码</h2><p>修改后，其他设备上的登录会全部失效。</p></div>
-        <div class="card"><div class="card-body">
-          <form class="form-narrow" onsubmit="event.preventDefault(); changePw()">
-            <label class="field"><span>当前密码</span><input id="pwOld" type="password" autocomplete="current-password"></label>
-            <label class="field"><span>新密码</span><input id="pwNew" type="password" autocomplete="new-password"><small>至少 8 位</small></label>
-            <div class="form-actions"><button class="btn">修改密码</button></div>
-          </form>
-          <p id="pwMsg" class="msg" role="status"></p>
-        </div></div>
-      </div>
-      <div class="section">
-        <div class="section-info"><h2>安全日志</h2><p>最近 50 条登录、资金与安全设置记录。发现不是本人的操作，请立即修改密码与 PIN。</p></div>
-        <div class="card"><div class="table-wrap short"><table class="data stack"><thead><tr><th>事件</th><th>时间</th><th>详情</th><th>IP</th></tr></thead><tbody id="auditBody"></tbody></table></div></div>
-      </div>
-      <div class="section">
-        <div class="section-info"><h2>数据</h2><p>导出本账户的全部记录（JSON，不含密码与 PIN 哈希），或为数据库创建一份热备份。</p></div>
-        <div class="card"><div class="card-body">
-          <div class="row"><button class="btn" onclick="exportData()"><i data-icon="download" data-size="16"></i>导出我的数据</button><button class="btn" onclick="backupDb()">备份数据库</button></div>
-          <p class="msg" id="backupMsg"></p>
-          <pre id="exportBox" class="mono" hidden style="margin:var(--space-3) 0 0;max-height:240px;overflow:auto;white-space:pre-wrap;word-break:break-all"></pre>
-        </div></div>
-      </div>
-      <div class="section">
-        <div class="section-info"><h2>重置演示数据</h2><p>清空本账户的交易、持仓与订单，余额恢复为 $50.00。账本保留冲正记录。此操作不可撤销。</p></div>
-        <div class="card danger-zone"><div class="card-body">
-          <form class="form-narrow" onsubmit="event.preventDefault(); resetDemo()">
-            <label class="field"><span>登录密码</span><input id="resetPw" type="password" autocomplete="current-password"></label>
-            <div class="form-actions"><button class="btn danger">重置演示数据</button></div>
-          </form>
-          <p class="msg" id="resetMsg"></p>
-        </div></div>
-      </div>
-      <div class="section">
-        <div class="section-info"><h2>声明</h2></div>
-        <p class="hint" style="font-size:var(--text-sm)">SpacePay 演示环境中的余额、持仓、价格与盈亏均为模拟数据，没有现金价值。平台不接收、不持有真实资金，不向任何市场发送订单，提现不会到达真实银行账户。本应用不提供投资、税务或法律建议。</p>
+      <div class="settings">
+        <div class="profile">
+          <span class="avatar lg" id="profileAvatar"></span>
+          <div style="flex:1;min-width:0">
+            <h1 id="profileName"></h1>
+            <p id="profileEmail"></p>
+            <div class="profile-tags" id="profileTags"></div>
+          </div>
+        </div>
+
+        <h2 class="group-title">安全</h2>
+        <ul class="list">
+          <li><button class="list-row" onclick="openPinSheet()"><span class="row-icon"><i data-icon="key-round" data-size="18"></i></span><span class="row-main"><span class="row-title">支付 PIN</span><span class="row-sub">转账、付款、提现和下单时验证</span></span><span class="row-value" id="pinStatus">—</span><i data-icon="chevron-right" data-size="18" class="row-chevron"></i></button></li>
+          <li><button class="list-row" onclick="openSheet('pwSheet')"><span class="row-icon"><i data-icon="lock-keyhole" data-size="18"></i></span><span class="row-main"><span class="row-title">登录密码</span><span class="row-sub">修改后其他设备会退出登录</span></span><span class="row-value">修改</span><i data-icon="chevron-right" data-size="18" class="row-chevron"></i></button></li>
+          <li><button class="list-row" onclick="openAudit()"><span class="row-icon"><i data-icon="history" data-size="18"></i></span><span class="row-main"><span class="row-title">安全日志</span><span class="row-sub" id="auditSub">登录、资金与安全设置记录</span></span><span class="row-value">最近 50 条</span><i data-icon="chevron-right" data-size="18" class="row-chevron"></i></button></li>
+        </ul>
+
+        <h2 class="group-title">偏好</h2>
+        <ul class="list">
+          <li><label class="list-row static"><span class="row-icon"><i data-icon="eye" data-size="18"></i></span><span class="row-main"><span class="row-title">显示金额</span><span class="row-sub">关闭后，余额与金额显示为 ••••</span></span><span class="switch"><input type="checkbox" id="amountSwitch" role="switch" onchange="setPrivacy(!this.checked)"><span></span></span></label></li>
+          <li><button class="list-row" onclick="openSheet('themeSheet')"><span class="row-icon"><i data-icon="palette" data-size="18"></i></span><span class="row-main"><span class="row-title">外观</span></span><span class="row-value" id="themeValue">跟随系统</span><i data-icon="chevron-right" data-size="18" class="row-chevron"></i></button></li>
+          <li class="browser-only"><button class="list-row" onclick="openInstall()"><span class="row-icon"><i data-icon="smartphone" data-size="18"></i></span><span class="row-main"><span class="row-title">添加到主屏幕</span><span class="row-sub">像 App 一样全屏打开</span></span><span class="row-value" id="installValue"></span><i data-icon="chevron-right" data-size="18" class="row-chevron"></i></button></li>
+        </ul>
+
+        <h2 class="group-title">数据</h2>
+        <ul class="list">
+          <li><button class="list-row" onclick="exportData()"><span class="row-icon"><i data-icon="download" data-size="18"></i></span><span class="row-main"><span class="row-title">导出我的数据</span><span class="row-sub">JSON 文件，不含密码与 PIN</span></span><i data-icon="chevron-right" data-size="18" class="row-chevron"></i></button></li>
+          <li><button class="list-row" onclick="backupDb()"><span class="row-icon"><i data-icon="database" data-size="18"></i></span><span class="row-main"><span class="row-title">备份数据库</span><span class="row-sub">在服务器上生成一份热备份</span></span><i data-icon="chevron-right" data-size="18" class="row-chevron"></i></button></li>
+        </ul>
+
+        <h2 class="group-title">关于</h2>
+        <ul class="list">
+          <li><button class="list-row" onclick="openSheet('aboutSheet')"><span class="row-icon"><i data-icon="info" data-size="18"></i></span><span class="row-main"><span class="row-title">演示环境说明</span></span><i data-icon="chevron-right" data-size="18" class="row-chevron"></i></button></li>
+        </ul>
+
+        <h2 class="group-title">危险操作</h2>
+        <ul class="list danger">
+          <li><button class="list-row danger" onclick="openSheet('resetSheet')"><span class="row-icon danger"><i data-icon="rotate-ccw" data-size="18"></i></span><span class="row-main"><span class="row-title">重置演示数据</span><span class="row-sub">清空交易、持仓与订单，余额恢复为 $50.00</span></span><i data-icon="chevron-right" data-size="18" class="row-chevron"></i></button></li>
+        </ul>
+
+        <button class="logout-btn" onclick="doLogout()"><i data-icon="log-out" data-size="18"></i>退出登录</button>
+        <p class="app-version">SpacePay 3.1 · 演示环境</p>
       </div>
     </section>
 
@@ -446,6 +417,90 @@
     <label class="field" id="opReasonField"><span id="opReasonLabel">原因</span><textarea id="opReason" rows="2" maxlength="200"></textarea></label>
     <p class="msg" id="opMsg"></p></div>
   <div class="modal-foot"><button type="button" class="btn" onclick="closeModal('opModal')">取消</button><button class="btn primary" id="opBtn">下一步</button></div></form></div>
+
+<!-- ============ 「我的」抽屉 ============ -->
+<div id="pinSheet" class="modal" hidden><div class="modal-card">
+  <div class="sheet-handle"></div>
+  <div class="modal-head"><div><h2 id="pinSheetTitle">支付 PIN</h2><p class="hint">6 位数字，与登录密码分开保存</p></div><button type="button" class="close" onclick="closeModal('pinSheet')" aria-label="关闭"><i data-icon="x" data-size="18"></i></button></div>
+  <form id="pinSetForm" onsubmit="event.preventDefault(); setPin()" hidden>
+    <div class="modal-body">
+      <p class="sheet-intro">设置后即可转账、付款、提现和下单。</p>
+      <label class="field"><span>新 PIN</span><input id="pinNew" class="pin-input" type="password" inputmode="numeric" maxlength="6" autocomplete="off" placeholder="••••••"></label>
+      <label class="field"><span>登录密码</span><span class="pw-wrap"><input id="pinPw" type="password" autocomplete="current-password"><button type="button" class="pw-toggle" data-for="pinPw">显示</button></span><small>用于验证是本人操作</small></label>
+      <p id="pinSetMsg" class="msg" role="status"></p>
+    </div>
+    <div class="modal-foot"><button type="button" class="btn" onclick="closeModal('pinSheet')">取消</button><button class="btn primary">设置 PIN</button></div>
+  </form>
+  <form id="pinChangeForm" onsubmit="event.preventDefault(); changePin()" hidden>
+    <div class="modal-body">
+      <label class="field"><span>当前 PIN</span><input id="pinOld" class="pin-input" type="password" inputmode="numeric" maxlength="6" autocomplete="off" placeholder="••••••"></label>
+      <label class="field"><span>新 PIN</span><input id="pinNew2" class="pin-input" type="password" inputmode="numeric" maxlength="6" autocomplete="off" placeholder="••••••"></label>
+      <p id="pinMsg" class="msg" role="status"></p>
+    </div>
+    <div class="modal-foot"><button type="button" class="btn" onclick="closeModal('pinSheet')">取消</button><button class="btn primary">修改 PIN</button></div>
+  </form>
+</div></div>
+
+<div id="pwSheet" class="modal" hidden><form class="modal-card" onsubmit="event.preventDefault(); changePw()">
+  <div class="sheet-handle"></div>
+  <div class="modal-head"><div><h2>修改登录密码</h2><p class="hint">修改后，其他设备上的登录会全部失效</p></div><button type="button" class="close" onclick="closeModal('pwSheet')" aria-label="关闭"><i data-icon="x" data-size="18"></i></button></div>
+  <div class="modal-body">
+    <label class="field"><span>当前密码</span><span class="pw-wrap"><input id="pwOld" type="password" autocomplete="current-password"><button type="button" class="pw-toggle" data-for="pwOld">显示</button></span></label>
+    <label class="field"><span>新密码</span><span class="pw-wrap"><input id="pwNew" type="password" autocomplete="new-password" oninput="checkPwRules()"><button type="button" class="pw-toggle" data-for="pwNew">显示</button></span></label>
+    <ul class="rules" id="pwRules"><li data-rule="len"><i data-icon="check" data-size="14"></i>至少 8 位</li><li data-rule="diff"><i data-icon="check" data-size="14"></i>与当前密码不同</li></ul>
+    <p id="pwMsg" class="msg" role="status"></p>
+  </div>
+  <div class="modal-foot"><button type="button" class="btn" onclick="closeModal('pwSheet')">取消</button><button class="btn primary">保存新密码</button></div>
+</form></div>
+
+<div id="auditSheet" class="modal" hidden><div class="modal-card wide">
+  <div class="sheet-handle"></div>
+  <div class="modal-head"><div><h2>安全日志</h2><p class="hint">最近 50 条。发现不是本人的操作，请立即修改密码与 PIN。</p></div><button type="button" class="close" onclick="closeModal('auditSheet')" aria-label="关闭"><i data-icon="x" data-size="18"></i></button></div>
+  <ul class="feed" id="auditList" style="padding-bottom:var(--space-3)"></ul>
+</div></div>
+
+<div id="themeSheet" class="modal" hidden><div class="modal-card">
+  <div class="sheet-handle"></div>
+  <div class="modal-head"><h2>外观</h2><button type="button" class="close" onclick="closeModal('themeSheet')" aria-label="关闭"><i data-icon="x" data-size="18"></i></button></div>
+  <div class="modal-body" role="radiogroup" aria-label="外观" id="themeChoices">
+    <button class="choice" role="radio" data-theme-opt="system" onclick="setTheme('system')"><span class="row-icon"><i data-icon="monitor" data-size="18"></i></span><span class="row-main">跟随系统</span><i data-icon="check" class="check"></i></button>
+    <button class="choice" role="radio" data-theme-opt="light" onclick="setTheme('light')"><span class="row-icon"><i data-icon="sun" data-size="18"></i></span><span class="row-main">浅色</span><i data-icon="check" class="check"></i></button>
+    <button class="choice" role="radio" data-theme-opt="dark" onclick="setTheme('dark')"><span class="row-icon"><i data-icon="moon" data-size="18"></i></span><span class="row-main">深色</span><i data-icon="check" class="check"></i></button>
+  </div>
+</div></div>
+
+<div id="installSheet" class="modal" hidden><div class="modal-card">
+  <div class="sheet-handle"></div>
+  <div class="modal-head"><div><h2>添加到主屏幕</h2><p class="hint">从主屏幕打开时全屏显示，不显示浏览器地址栏</p></div><button type="button" class="close" onclick="closeModal('installSheet')" aria-label="关闭"><i data-icon="x" data-size="18"></i></button></div>
+  <div class="modal-body">
+    <button class="btn primary btn-full" id="installBtn" onclick="installApp()" hidden><i data-icon="smartphone" data-size="16"></i>安装 SpacePay</button>
+    <dl class="kv" id="installSteps">
+      <dt>iPhone / iPad（Safari）</dt><dd>点底部「分享」→「添加到主屏幕」</dd>
+      <dt>Android（Chrome）</dt><dd>点右上角菜单 →「安装应用」</dd>
+      <dt>电脑（Chrome / Edge）</dt><dd>点地址栏右侧的安装图标</dd>
+    </dl>
+  </div>
+</div></div>
+
+<div id="aboutSheet" class="modal" hidden><div class="modal-card">
+  <div class="sheet-handle"></div>
+  <div class="modal-head"><h2>演示环境说明</h2><button type="button" class="close" onclick="closeModal('aboutSheet')" aria-label="关闭"><i data-icon="x" data-size="18"></i></button></div>
+  <div class="modal-body">
+    <p class="sheet-intro">SpacePay 演示环境中的余额、持仓、价格与盈亏均为模拟数据，没有现金价值。平台不接收、不持有真实资金，不向任何市场发送订单，提现不会到达真实银行账户。本应用不提供投资、税务或法律建议。</p>
+    <dl class="kv"><dt>版本</dt><dd>SpacePay 3.1</dd><dt>资金</dt><dd>虚拟资金（USD）</dd><dt>行情</dt><dd>模拟价格，每小时推进 1 个模拟日</dd></dl>
+  </div>
+</div></div>
+
+<div id="resetSheet" class="modal" hidden><form class="modal-card" onsubmit="event.preventDefault(); resetDemo()">
+  <div class="sheet-handle"></div>
+  <div class="modal-head"><div><h2>重置演示数据</h2><p class="hint">此操作不可撤销</p></div><button type="button" class="close" onclick="closeModal('resetSheet')" aria-label="关闭"><i data-icon="x" data-size="18"></i></button></div>
+  <div class="modal-body">
+    <p class="notice" style="margin-bottom:var(--space-4)"><i data-icon="circle-alert" data-size="18"></i><span>将清空本账户的交易、持仓与订单，余额恢复为 $50.00。账本会保留冲正记录用于对账。</span></p>
+    <label class="field"><span>输入登录密码确认</span><span class="pw-wrap"><input id="resetPw" type="password" autocomplete="current-password"><button type="button" class="pw-toggle" data-for="resetPw">显示</button></span></label>
+    <p class="msg" id="resetMsg"></p>
+  </div>
+  <div class="modal-foot"><button type="button" class="btn" onclick="closeModal('resetSheet')">取消</button><button class="btn danger solid">重置</button></div>
+</form></div>
 
 <!-- ============ 投资弹窗 ============ -->
 <div id="productModal" class="modal" hidden><form class="modal-card wide" onsubmit="event.preventDefault(); previewOrder()">

@@ -13,6 +13,7 @@ let products = [];
 let simDay = 0;
 let currentRange = '1M';
 let privacy = false;
+try { privacy = localStorage.getItem('spacepay_hide_amounts') === '1'; } catch (_) { /* ignore */ }
 let currentView = 'home';
 let curProduct = null;
 let curSide = 'BUY';
@@ -304,7 +305,9 @@ function enterApp() {
   const roleText = me.role && me.role !== 'customer' ? ROLE_LABEL[me.role] || me.role : '';
   $('topEmail').textContent = me.email + (roleText ? ' · ' + roleText : '');
   $('profileName').textContent = me.nickname;
-  $('profileEmail').textContent = me.email + (roleText ? ' · ' + roleText : '');
+  $('profileEmail').textContent = me.email;
+  syncPrivacyUi();
+  renderProfileTags();
   const staff = can('console.read');
   $('consoleNav').hidden = !staff;
   $('roleLabel').textContent = ROLE_LABEL[me.role] || me.role;
@@ -333,13 +336,20 @@ function refreshCurrent() {
   };
   (loaders[currentView] || (() => {}))();
 }
-function togglePrivacy() {
-  privacy = !privacy;
+// 金额显示：首页眼睛按钮与「我的 → 显示金额」开关共用，选择会被记住
+function setPrivacy(hide) {
+  privacy = !!hide;
+  try { localStorage.setItem('spacepay_hide_amounts', privacy ? '1' : '0'); } catch (_) { /* ignore */ }
+  syncPrivacyUi();
+  if (currentView !== 'settings') refreshCurrent();
+}
+function syncPrivacyUi() {
   const b = $('privacyBtn');
   b.innerHTML = icon(privacy ? 'eye-off' : 'eye');
   b.setAttribute('aria-label', privacy ? '显示金额' : '隐藏金额');
-  refreshCurrent();
+  $('amountSwitch').checked = !privacy;
 }
+function togglePrivacy() { setPrivacy(!privacy); }
 
 // ---------- 认证 ----------
 async function requestCode() {
@@ -844,58 +854,118 @@ async function executeRebalance() {
   loadInvest();
 }
 
-// ---------- 我的 ----------
+// ---------- 我的（分组设置列表：每行显示当前状态，点开抽屉操作） ----------
+function renderProfileTags() {
+  const tags = [];
+  if (me.role && me.role !== 'customer') tags.push(`<span class="badge role">${esc(ROLE_LABEL[me.role] || me.role)}</span>`);
+  tags.push(me.status === 'FROZEN' ? '<span class="badge danger">账户已冻结</span>' : '<span class="badge success">账户正常</span>');
+  if (me.created_at) tags.push(`<span class="badge plain">${icon('calendar', 12)}注册于 ${fmtTime(me.created_at).slice(0, 10)}</span>`);
+  $('profileTags').innerHTML = tags.join('');
+}
+const THEME_LABEL = { system: '跟随系统', light: '浅色', dark: '深色' };
 function loadSettings() {
+  $('pinStatus').innerHTML = me.has_pin ? '<span class="badge success">已设置</span>' : '<span class="badge warning">未设置</span>';
+  syncThemeUi();
+  syncPrivacyUi();
+  const standalone = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone;
+  $('installValue').textContent = standalone ? '已安装' : deferredInstall ? '可安装' : '';
+  api('/api/security/audit').then((j) => {
+    if (!j.ok) return;
+    auditItems = j.items;
+    const last = j.items.find((a) => a.action === 'login');
+    $('auditSub').textContent = last ? `上次登录 ${fmtTime(last.created_at)}${last.ip ? ' · ' + last.ip : ''}` : '登录、资金与安全设置记录';
+  });
+}
+function openPinSheet() {
   $('pinSetForm').hidden = !!me.has_pin;
   $('pinChangeForm').hidden = !me.has_pin;
-  syncThemeSeg();
-  loadAudit();
+  $('pinSheetTitle').textContent = me.has_pin ? '修改支付 PIN' : '设置支付 PIN';
+  msg('pinMsg', ''); msg('pinSetMsg', '');
+  openSheet('pinSheet');
 }
 function currentTheme() { try { return localStorage.getItem('spacepay_theme') || 'system'; } catch (_) { return 'system'; } }
 function setTheme(t) {
   try { if (t === 'system') localStorage.removeItem('spacepay_theme'); else localStorage.setItem('spacepay_theme', t); } catch (_) { /* ignore */ }
   if (t === 'system') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = t;
-  syncThemeSeg();
-  refreshCurrent();
+  syncThemeUi();
 }
-function syncThemeSeg() { const t = currentTheme(); document.querySelectorAll('#themeSeg button').forEach((b) => b.classList.toggle('active', b.dataset.themeOpt === t)); }
+function syncThemeUi() {
+  const t = currentTheme();
+  $('themeValue').textContent = THEME_LABEL[t];
+  document.querySelectorAll('#themeChoices .choice').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.themeOpt === t)));
+}
+// 密码框「显示 / 隐藏」：文字按钮，可来回切换
+document.addEventListener('click', (e) => {
+  const b = e.target.closest && e.target.closest('.pw-toggle');
+  if (!b) return;
+  const input = $(b.dataset.for);
+  const show = input.type === 'password';
+  input.type = show ? 'text' : 'password';
+  b.textContent = show ? '隐藏' : '显示';
+  b.setAttribute('aria-pressed', String(show));
+  b.setAttribute('aria-label', (show ? '隐藏' : '显示') + '密码');
+});
+function checkPwRules() {
+  const v = $('pwNew').value;
+  const ok = { len: v.length >= 8, diff: v.length > 0 && v !== $('pwOld').value };
+  document.querySelectorAll('#pwRules li').forEach((li) => li.classList.toggle('ok', !!ok[li.dataset.rule]));
+}
 async function setPin() {
   const j = await api('/api/security/set-pin', { method: 'POST', body: { pin: $('pinNew').value.trim(), password: $('pinPw').value } });
-  msg('pinMsg', j.ok ? j.message : errText(j), !j.ok);
-  if (j.ok) { me.has_pin = 1; $('pinNew').value = ''; $('pinPw').value = ''; loadSettings(); toast('支付 PIN 已设置'); }
+  if (!j.ok) return msg('pinSetMsg', errText(j), true);
+  me.has_pin = 1; $('pinNew').value = ''; $('pinPw').value = '';
+  closeModal('pinSheet'); toast('支付 PIN 已设置'); loadSettings();
 }
 async function changePin() {
   const j = await api('/api/security/change-pin', { method: 'POST', body: { old_pin: $('pinOld').value.trim(), new_pin: $('pinNew2').value.trim() } });
-  msg('pinMsg', j.ok ? j.message : errText(j), !j.ok);
-  if (j.ok) { $('pinOld').value = ''; $('pinNew2').value = ''; loadAudit(); }
+  if (!j.ok) return msg('pinMsg', errText(j), true);
+  $('pinOld').value = ''; $('pinNew2').value = '';
+  closeModal('pinSheet'); toast('支付 PIN 已修改');
 }
 async function changePw() {
   const j = await api('/api/security/change-password', { method: 'POST', body: { old_password: $('pwOld').value, new_password: $('pwNew').value } });
-  msg('pwMsg', j.ok ? j.message : errText(j), !j.ok);
-  if (j.ok) { $('pwOld').value = ''; $('pwNew').value = ''; loadAudit(); }
+  if (!j.ok) return msg('pwMsg', errText(j), true);
+  $('pwOld').value = ''; $('pwNew').value = ''; checkPwRules(); msg('pwMsg', '');
+  closeModal('pwSheet'); toast(j.message);
 }
-async function loadAudit() {
+const AUDIT_ICON = { login: 'shield-check', login_failed: 'circle-alert', logout: 'log-out', set_pin: 'key-round', change_pin: 'key-round', change_password: 'lock-keyhole', pin_failed: 'circle-alert', transfer: 'arrow-up-right', pay: 'credit-card', topup: 'plus', withdrawal: 'landmark', order: 'trending-up', fd_buy: 'piggy-bank', rebalance: 'scale', demo_reset: 'rotate-ccw', alert_fired: 'bell', export: 'download', register: 'badge-check' };
+let auditItems = [];
+async function openAudit() {
+  openSheet('auditSheet');
   const j = await api('/api/security/audit');
-  if (!j.ok) return;
-  $('auditBody').innerHTML = j.items.map((a) => `<tr><td>${esc(AUDIT_LABEL[a.action] || a.action)}</td><td>${fmtTime(a.created_at)}</td>${tdTrunc(a.detail || '—', 'wide')}<td class="mono">${esc(a.ip || '—')}</td></tr>`).join('')
-    || emptyRow(4, '暂无记录', '');
+  if (j.ok) auditItems = j.items;
+  let html = '';
+  let lastDay = '';
+  for (const a of auditItems) {
+    const day = dayLabel(a.created_at);
+    if (day !== lastDay) { html += `<li class="feed-day"><span>${esc(day)}</span></li>`; lastDay = day; }
+    const warn = a.action === 'login_failed' || a.action === 'pin_failed';
+    html += `<li><div class="feed-item" style="cursor:default"><span class="feed-avatar ${warn ? '' : 'brand'}" ${warn ? 'style="background:var(--danger-bg);color:var(--danger)"' : ''}>${icon(AUDIT_ICON[a.action] || 'shield-check', 18)}</span>
+      <span class="feed-main"><span class="feed-title" style="display:block">${esc(AUDIT_LABEL[a.action] || a.action)}</span><span class="feed-sub" title="${esc(a.detail || '')}">${esc(a.detail || '')}</span></span>
+      <span class="feed-amt" style="font-weight:400"><small style="margin:0">${fmtClock(a.created_at)}</small><small>${esc(a.ip || '')}</small></span></div></li>`;
+  }
+  $('auditList').innerHTML = html || '<li class="feed-empty">暂无记录</li>';
 }
 async function exportData() {
   const j = await api('/api/backup/export');
-  if (!j.ok) return msg('backupMsg', errText(j), true);
-  $('exportBox').hidden = false;
-  $('exportBox').textContent = JSON.stringify(j.export, null, 2);
-  msg('backupMsg', '已导出本账户数据（不含密码与 PIN 哈希）。');
+  if (!j.ok) return toast(errText(j), true);
+  const name = `spacepay-export-${new Date().toISOString().slice(0, 10)}.json`;
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(j.export, null, 2)], { type: 'application/json' }));
+  a.download = name; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  toast('已下载 ' + name);
 }
 async function backupDb() {
+  if (!confirm('在服务器上生成一份数据库热备份？')) return;
   const j = await api('/api/backup/db', { method: 'POST' });
-  msg('backupMsg', j.ok ? `${j.message}：${j.file}（完整性检查：${j.integrity || '—'}）` : errText(j), !j.ok);
+  toast(j.ok ? `${j.message}（完整性检查：${j.integrity || '—'}）` : errText(j), !j.ok);
 }
 async function resetDemo() {
-  if (!confirm('重置后，本账户的交易、持仓和订单将被清空，余额恢复为 $50.00。继续？')) return;
   const j = await api('/api/demo/reset', { method: 'POST', body: { password: $('resetPw').value } });
-  msg('resetMsg', j.ok ? j.message : errText(j), !j.ok);
-  if (j.ok) $('resetPw').value = '';
+  if (!j.ok) return msg('resetMsg', errText(j), true);
+  $('resetPw').value = ''; msg('resetMsg', '');
+  closeModal('resetSheet'); toast(j.message);
 }
 
 // ---------- 运营后台 ----------
@@ -1070,8 +1140,9 @@ async function loadOpLogs(page) {
 
 // ---------- PWA：service worker、安装、离线提示 ----------
 let deferredInstall = null;
-window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); deferredInstall = e; $('installBtn').hidden = false; $('installHint').textContent = '安装后可以从主屏幕直接打开。'; });
-window.addEventListener('appinstalled', () => { deferredInstall = null; $('installSection').hidden = true; toast('已安装到主屏幕'); });
+window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); deferredInstall = e; $('installBtn').hidden = false; $('installValue').textContent = '可安装'; });
+window.addEventListener('appinstalled', () => { deferredInstall = null; $('installBtn').hidden = true; $('installValue').textContent = '已安装'; closeModal('installSheet'); toast('已添加到主屏幕'); });
+function openInstall() { $('installBtn').hidden = !deferredInstall; openSheet('installSheet'); }
 async function installApp() {
   if (!deferredInstall) return;
   deferredInstall.prompt();
