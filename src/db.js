@@ -1,4 +1,4 @@
-// 数据层 — v2 正式版（FadeHost 适配）
+// SpacePay 数据层（FadeHost / PandaStack 适配）
 // SQLite 单文件优先（node:sqlite，无原生编译），JSON 文件为同 API 降级后端。
 // 默认路径：/data/app.db（SQLite）/ /data/app.json（JSON 降级）；本地 ./data/。
 // 首次以 SQLite 启动且存在旧版 /data/app.json 时，自动迁移旧用户/钱包/账单后改名 .migrated.json（不删除）。
@@ -21,6 +21,8 @@
 //   - 都不存在时（本地开发）→ ./data/app.json。
 const fs = require('fs');
 const path = require('path');
+const logger = require('./logger');
+const { retrySync } = require('./resilience');
 
 // DATABASE_PATH 默认值：优先用 FadeHost 持久盘 /data/app.db（SQLite），
 // 其次 /workspace/data/app.db，本地开发回退到项目内 ./data/app.db。
@@ -47,17 +49,22 @@ const dbPath = process.env.DATABASE_PATH || defaultDbPath();
 const forceJson = process.env.DB_BACKEND === 'json' || /\.json$/i.test(dbPath);
 
 const SCHEMA_TABLES = ['users', 'verification_codes', 'demo_inbox', 'sessions', 'wallets', 'transactions', 'audit_logs',
-  'products', 'price_snapshots', 'holdings', 'holding_lots', 'orders', 'portfolio_snapshots', 'dividends', 'watchlist', 'alerts', 'goals', 'fixed_deposits', 'risk_targets'];
+  'products', 'price_snapshots', 'holdings', 'holding_lots', 'orders', 'portfolio_snapshots', 'dividends', 'watchlist', 'alerts', 'goals', 'fixed_deposits', 'risk_targets',
+  // SpacePay 新增：复式账本、支付/退款/提现、幂等键、操作日志
+  'ledger_entries', 'payments', 'refunds', 'withdrawals', 'idempotency_keys', 'operation_logs'];
 // 有自增 id 的表；wallets 的主键是 user_id，没有 id 列
 const AUTO_ID_TABLES = new Set(['users', 'verification_codes', 'demo_inbox', 'sessions', 'transactions', 'audit_logs',
-  'price_snapshots', 'holding_lots', 'orders', 'portfolio_snapshots', 'dividends', 'alerts', 'goals', 'fixed_deposits']);
+  'price_snapshots', 'holding_lots', 'orders', 'portfolio_snapshots', 'dividends', 'alerts', 'goals', 'fixed_deposits',
+  'ledger_entries', 'payments', 'refunds', 'withdrawals', 'idempotency_keys', 'operation_logs']);
 // SQLite 建表语句里的列默认值（与原版 src/db.js 的 CREATE TABLE 一致）。
 // JSON 后端插入时未指定的列要补上这些默认值，否则 `used = 0` 这类查询会查不到行。
 const COLUMN_DEFAULTS = {
-  users: { pin_salt: null, pin_hash: null, failed_login_attempts: 0, locked_until: null, risk_level: null, risk_score: null },
+  users: { pin_salt: null, pin_hash: null, failed_login_attempts: 0, locked_until: null, risk_level: null, risk_score: null,
+    role: 'customer', status: 'ACTIVE', frozen_reason: null, frozen_at: null },
   verification_codes: { attempts: 0, used: 0 },
   wallets: { balance_cents: 0 },
-  transactions: { product_id: null, order_id: null, counterparty_email: null, merchant: null, category: null },
+  transactions: { product_id: null, order_id: null, counterparty_email: null, merchant: null, category: null,
+    sim_day: null, status: 'SUCCEEDED', ref_type: null, ref_id: null },
   products: { dividend_yield: 0, is_active: 1, tradeable: 1 },
   price_snapshots: {},
   holdings: { quantity_milli: 0 },
@@ -70,6 +77,12 @@ const COLUMN_DEFAULTS = {
   goals: {},
   fixed_deposits: { status: 'ACTIVE' },
   risk_targets: {},
+  ledger_entries: { user_id: null, ref_type: null, ref_id: null, memo: null },
+  payments: { refunded_cents: 0, status: 'SUCCEEDED', note: null, transaction_id: null },
+  refunds: { reason: null, operator_id: null, transaction_id: null },
+  withdrawals: { status: 'PENDING', reviewed_by: null, review_note: null, reviewed_at: null, transaction_id: null },
+  idempotency_keys: { status_code: null, response_json: null },
+  operation_logs: { actor_id: null, actor_email: null, actor_role: null, target_type: null, target_id: null, amount_cents: null, reason: null, request_id: null, ip: null },
 };
 function applyDefaults(table, row) {
   const defs = COLUMN_DEFAULTS[table];
@@ -107,6 +120,10 @@ CREATE TABLE IF NOT EXISTS users (
   locked_until INTEGER,
   risk_level TEXT,
   risk_score INTEGER,
+  role TEXT NOT NULL DEFAULT 'customer',
+  status TEXT NOT NULL DEFAULT 'ACTIVE',
+  frozen_reason TEXT,
+  frozen_at INTEGER,
   created_at INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS verification_codes (
@@ -153,6 +170,9 @@ CREATE TABLE IF NOT EXISTS transactions (
   product_id TEXT,
   order_id INTEGER,
   sim_day INTEGER,
+  status TEXT NOT NULL DEFAULT 'SUCCEEDED',
+  ref_type TEXT,
+  ref_id INTEGER,
   created_at INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS audit_logs (
@@ -277,22 +297,132 @@ CREATE INDEX IF NOT EXISTS idx_audit_user_created ON audit_logs(user_id, created
 CREATE INDEX IF NOT EXISTS idx_code_email ON verification_codes(email, expires_at);
 CREATE INDEX IF NOT EXISTS idx_session_token ON sessions(token_hash);
 `);
+  // 旧库升级：给已有表补列（列已存在时 SQLite 报错，忽略即可）
+  for (const ddl of [
+    "ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'customer'",
+    "ALTER TABLE users ADD COLUMN status TEXT NOT NULL DEFAULT 'ACTIVE'",
+    'ALTER TABLE users ADD COLUMN frozen_reason TEXT',
+    'ALTER TABLE users ADD COLUMN frozen_at INTEGER',
+    'ALTER TABLE transactions ADD COLUMN sim_day INTEGER',
+    "ALTER TABLE transactions ADD COLUMN status TEXT NOT NULL DEFAULT 'SUCCEEDED'",
+    'ALTER TABLE transactions ADD COLUMN ref_type TEXT',
+    'ALTER TABLE transactions ADD COLUMN ref_id INTEGER',
+  ]) {
+    try { db.exec(ddl); } catch (_) { /* 列已存在 */ }
+  }
+  db.exec(`
+-- 复式账本：只追加，不更新、不删除。同一 journal_id 的 amount_cents 之和必须为 0。
+-- 账户余额 = 该账户全部分录之和；钱包账户 account='wallet' + user_id。
+CREATE TABLE IF NOT EXISTS ledger_entries (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  journal_id TEXT NOT NULL,
+  journal_type TEXT NOT NULL,
+  account TEXT NOT NULL,
+  user_id INTEGER,
+  amount_cents INTEGER NOT NULL,
+  currency TEXT NOT NULL DEFAULT 'USD',
+  ref_type TEXT,
+  ref_id INTEGER,
+  memo TEXT,
+  created_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS payments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  merchant TEXT NOT NULL,
+  category TEXT,
+  amount_cents INTEGER NOT NULL CHECK (amount_cents > 0),
+  refunded_cents INTEGER NOT NULL DEFAULT 0 CHECK (refunded_cents >= 0 AND refunded_cents <= amount_cents),
+  currency TEXT NOT NULL DEFAULT 'USD',
+  status TEXT NOT NULL DEFAULT 'SUCCEEDED',
+  note TEXT,
+  transaction_id INTEGER,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS refunds (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  payment_id INTEGER NOT NULL REFERENCES payments(id),
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  amount_cents INTEGER NOT NULL CHECK (amount_cents > 0),
+  reason TEXT,
+  status TEXT NOT NULL DEFAULT 'SUCCEEDED',
+  operator_id INTEGER,
+  transaction_id INTEGER,
+  created_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS withdrawals (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  amount_cents INTEGER NOT NULL CHECK (amount_cents > 0),
+  destination TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'PENDING',
+  transaction_id INTEGER,
+  reviewed_by INTEGER,
+  review_note TEXT,
+  reviewed_at INTEGER,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS idempotency_keys (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  scope TEXT NOT NULL,
+  idem_key TEXT NOT NULL,
+  request_hash TEXT NOT NULL,
+  state TEXT NOT NULL,
+  status_code INTEGER,
+  response_json TEXT,
+  created_at INTEGER NOT NULL,
+  UNIQUE(user_id, scope, idem_key)
+);
+CREATE TABLE IF NOT EXISTS operation_logs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  actor_id INTEGER,
+  actor_email TEXT,
+  actor_role TEXT,
+  action TEXT NOT NULL,
+  target_type TEXT,
+  target_id INTEGER,
+  amount_cents INTEGER,
+  reason TEXT,
+  result TEXT NOT NULL,
+  request_id TEXT,
+  ip TEXT,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_ledger_journal ON ledger_entries(journal_id);
+CREATE INDEX IF NOT EXISTS idx_ledger_account ON ledger_entries(account, user_id);
+CREATE INDEX IF NOT EXISTS idx_payments_user ON payments(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_withdrawals_status ON withdrawals(status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_oplog_created ON operation_logs(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_tx_created ON transactions(created_at DESC);
+`);
+  // 支持嵌套调用：已在事务中时直接执行（由最外层负责提交/回滚）。
+  // 写锁冲突（SQLITE_BUSY，多进程共享同一库文件时可能出现）时整体回滚后退避重试。
+  let depth = 0;
   function withTransaction(fn) {
-    db.exec('BEGIN IMMEDIATE');
-    try {
-      const result = fn();
-      db.exec('COMMIT');
-      return result;
-    } catch (e) {
-      try { db.exec('ROLLBACK'); } catch (_) {}
-      throw e;
-    }
+    if (depth > 0) return fn();
+    return retrySync(() => {
+      db.exec('BEGIN IMMEDIATE');
+      depth++;
+      try {
+        const result = fn();
+        db.exec('COMMIT');
+        return result;
+      } catch (e) {
+        try { db.exec('ROLLBACK'); } catch (_) {}
+        throw e;
+      } finally {
+        depth--;
+      }
+    }, { label: 'sqlite.transaction' });
   }
   function audit(userId, email, action, detail, ip) {
     db.prepare('INSERT INTO audit_logs (user_id, email, action, detail, ip, created_at) VALUES (?,?,?,?,?,?)')
       .run(userId || null, email || null, action, detail || '', ip || '', Date.now());
   }
-  return { db, audit, withTransaction, backend: 'sqlite' };
+  return { db, audit, withTransaction, backend: 'sqlite', path: sqlitePath };
 }
 
 // ============================================================
@@ -523,6 +653,12 @@ function createJsonBackend() {
       }
       rows = [out];
     } else {
+      // 先排序再投影：ORDER BY 的列不一定在 SELECT 列表里（如 SELECT balance_after_cents … ORDER BY id）
+      if (parsed.orderBy) {
+        const dir = parsed.orderDir === 'DESC' ? -1 : 1;
+        rows = rows.slice().sort((a, b) => cmp(a[parsed.orderBy], b[parsed.orderBy]) * dir);
+        parsed = { ...parsed, orderBy: null };
+      }
       rows = rows.map((r) => {
         if (parsed.cols.length === 1 && parsed.cols[0].kind === 'star') return { ...r };
         const out = {};
@@ -672,6 +808,7 @@ function createJsonBackend() {
   };
 
   function withTransaction(fn) {
+    if (inTx) return fn(); // 嵌套：由最外层事务提交/回滚
     db.exec('BEGIN IMMEDIATE');
     try {
       const result = fn();
@@ -704,13 +841,13 @@ if (forceJson) {
     impl = createSqliteBackend();
     backendName = 'sqlite';
   } catch (e) {
-    console.warn('[payment-app] node:sqlite 不可用（' + e.message + '），自动降级到 JSON 文件存储');
+    logger.warn('db.sqlite_unavailable', { fallback: 'json', err: e });
     impl = createJsonBackend();
     backendName = 'json';
     jsonPathInfo = impl.jsonPath;
   }
 }
-console.log('[payment-app] 数据后端: ' + backendName + (backendName === 'json' ? ' (' + jsonPathInfo + ')' : ' (' + dbPath + ')'));
+logger.info('db.ready', { backend: backendName, path: backendName === 'json' ? jsonPathInfo : dbPath });
 
 // ---------- v1 JSON -> SQLite 一次性迁移 ----------
 // 仅当使用 SQLite 且 users 表为空、且存在旧版 app.json 时执行；迁移后把旧文件改名
@@ -749,9 +886,9 @@ function migrateLegacyJson() {
       throw e;
     }
     fs.renameSync(legacy, legacy + '.migrated.json');
-    console.log('[payment-app] 已从旧版 JSON 迁移用户数据: ' + legacy + ' -> ' + legacy + '.migrated.json');
+    logger.info('db.legacy_migrated', { from: legacy, renamed_to: legacy + '.migrated.json' });
   } catch (e) {
-    console.warn('[payment-app] 旧版 JSON 迁移跳过/失败: ' + e.message);
+    logger.warn('db.legacy_migration_skipped', { err: e });
   }
 }
 migrateLegacyJson();

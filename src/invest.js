@@ -1,9 +1,14 @@
-// 投资系统 API（v2）— 模拟交易，仅虚拟资金
-// 挂载方式：require('./invest')(app, { db, audit, withTransaction, sec })
-// 复用 v1 的 sessions 表鉴权与 PBKDF2 PIN；所有金额为整数分；
+// SpacePay 投资模块（模拟交易，仅虚拟资金）
+// 挂载方式：require('./invest')(app, { db, audit, withTransaction, sec, authz })
+// 鉴权复用 src/auth.js；所有金额为整数分（src/money.js）；现金变动统一走 wallet.applyCash（含复式分录）；
 // 每笔订单一个原子事务 + 幂等键；成本按 FIFO 批次核算。
 const crypto = require('crypto');
 const prod = require('./products');
+const money = require('./money');
+const wallet = require('./wallet');
+const metrics = require('./metrics');
+const logger = require('./logger');
+const { AppError } = require('./errors');
 
 const RISK_LEVELS = ['Conservative', 'Balanced', 'Growth', 'Aggressive'];
 const RISK_ZH = { Conservative: '保守型', Balanced: '稳健型', Growth: '成长型', Aggressive: '进取型' };
@@ -28,47 +33,43 @@ const CLASS_ZH = { STOCK: '股票', ETF: 'ETF', FUND: '基金', GOLD: '黄金', 
 const TYPE_ZH = { STOCK: '股票', ETF: 'ETF', FUND: '基金', GOLD: '黄金', FIXED_DEPOSIT: '定存', BENCHMARK: '基准' };
 
 function now() { return Date.now(); }
-function fmtC(c) { return (c / 100).toFixed(2); }
+// 展示用：整数分 → "1,234.56"（不带货币符号，调用处自带 $）
+function fmtC(c) { return money.formatCents(c).replace('$', ''); }
+const PRODUCT_NOT_TRADEABLE = '产品不存在或不可交易';
+
+// 下单数量：金额（2 位小数）或份数（3 位小数），全部按字符串解析为整数，不经过浮点
+function parseQuantity(body, priceCents) {
+  if (body.quantity_milli !== undefined) {
+    const q = Number(body.quantity_milli);
+    if (!Number.isInteger(q)) return { error: '数量格式不正确' };
+    return { qtyMilli: q };
+  }
+  if (body.amount !== undefined) {
+    const r = money.parseAmount(body.amount);
+    if (!r.ok) return { error: r.message };
+    return { qtyMilli: money.mulDiv(r.cents, 1000, priceCents) };
+  }
+  if (body.quantity !== undefined) {
+    const r = money.parseDecimal(body.quantity, 3);
+    if (!r.ok || r.value <= 0) return { error: '数量格式不正确，最多 3 位小数' };
+    return { qtyMilli: r.value };
+  }
+  return { error: '请输入金额或数量' };
+}
 
 module.exports = function mountInvest(app, ctx) {
-  const { db, audit, withTransaction, sec } = ctx;
+  const { db, audit, withTransaction, sec, authz } = ctx;
+  const { auth, requireActive, requirePin } = authz;
   let ticking = false;
+  let lastTickAt = null;
+  let lastTickError = null;
 
   // --- 初始化：产品、30 天历史、sim_day 列（SQLite；JSON 后端忽略） ---
   try { db.exec('ALTER TABLE transactions ADD COLUMN sim_day INTEGER'); } catch (_) { /* 列已存在或 JSON 后端 */ }
   prod.ensureHistory(db);
 
-  // ---------- 鉴权（与 v1 server.js 同一套 sessions 表） ----------
-  function auth(req, res, next) {
-    const header = req.headers.authorization || '';
-    const token = header.startsWith('Bearer ') ? header.slice(7) : (req.cookies && req.cookies.session) || '';
-    if (!token) return res.status(401).json({ ok: false, error: '未登录' });
-    const row = db.prepare('SELECT * FROM sessions WHERE token_hash = ? AND expires_at > ?').get(sec.hashToken(token), now());
-    if (!row) return res.status(401).json({ ok: false, error: '会话已过期，请重新登录' });
-    const user = db.prepare('SELECT id, email, nickname, risk_level, risk_score, pin_hash IS NOT NULL as has_pin, created_at FROM users WHERE id = ?').get(row.user_id);
-    if (!user) return res.status(401).json({ ok: false, error: '用户不存在' });
-    req.user = user; req.sessionId = row.id; next();
-  }
-  function requirePin(req, res, next) {
-    const pin = String(req.body.pin || '');
-    if (!sec.isValidPin(pin)) return res.status(400).json({ ok: false, error: '请输入 6 位支付 PIN' });
-    const row = db.prepare('SELECT pin_salt, pin_hash FROM users WHERE id = ?').get(req.user.id);
-    if (!row || !row.pin_hash) return res.status(400).json({ ok: false, error: '请先在安全中心设置支付 PIN' });
-    if (!sec.verifyPin(pin, row.pin_salt, row.pin_hash)) {
-      audit(req.user.id, req.user.email, 'pin_failed', '支付 PIN 验证失败', '');
-      return res.status(403).json({ ok: false, error: '支付 PIN 不正确' });
-    }
-    next();
-  }
-  function addTx(userId, type, amountCents, balanceAfter, opts = {}) {
-    db.prepare('INSERT INTO transactions (user_id, type, amount_cents, balance_after_cents, counterparty_email, merchant, category, description, product_id, order_id, sim_day, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)')
-      .run(userId, type, amountCents, balanceAfter, opts.counterparty || null, opts.merchant || null,
-        opts.category || null, opts.description || '', opts.product_id || null, opts.order_id || null,
-        prod.currentDay(db), now());
-  }
   function cashOf(userId) {
-    const w = db.prepare('SELECT balance_cents FROM wallets WHERE user_id = ?').get(userId);
-    return w ? w.balance_cents : 0;
+    return wallet.balanceOf(db, userId);
   }
   function holdingsDetail(userId) {
     const day = prod.currentDay(db);
@@ -78,15 +79,15 @@ module.exports = function mountInvest(app, ctx) {
       const p = prod.PRODUCT_MAP[h.product_id];
       if (!p) continue;
       const lots = db.prepare('SELECT quantity_milli, unit_cost_cents FROM holding_lots WHERE user_id = ? AND product_id = ? AND quantity_milli > 0 ORDER BY id ASC').all(userId, h.product_id);
-      const costBasis = lots.reduce((s, l) => s + Math.round((l.quantity_milli * l.unit_cost_cents) / 1000), 0);
+      const costBasis = lots.reduce((s, l) => s + prod.holdingValue(l.quantity_milli, l.unit_cost_cents), 0);
       const price = prod.priceAt(p, day);
       const prev = prod.priceAt(p, day - 1);
-      const value = Math.round((h.quantity_milli * price) / 1000);
+      const value = prod.holdingValue(h.quantity_milli, price);
       const hist = prod.priceHistory(db, h.product_id, 14).map((x) => x.price_cents);
       out.push({
         product_id: h.product_id, name: p.name, type: p.type, risk: p.risk,
         quantity_milli: h.quantity_milli, quantity: h.quantity_milli / 1000,
-        avg_cost_cents: h.quantity_milli ? Math.round((costBasis * 1000) / h.quantity_milli) : 0,
+        avg_cost_cents: h.quantity_milli ? money.mulDiv(costBasis, 1000, h.quantity_milli) : 0,
         cost_basis_cents: costBasis, price_cents: price,
         day_change_pct: prev ? ((price - prev) / prev) * 100 : 0,
         market_value_cents: value,
@@ -102,19 +103,28 @@ module.exports = function mountInvest(app, ctx) {
     return rows.reduce((s, r) => s + (r.realized_pl_cents || 0), 0);
   }
 
-  // ---------- 定时推进 ----------
+  // ---------- 定时推进（由 server.start() 调用 startTicker 启动；测试中不启动） ----------
   function runTick() {
-    if (ticking) return;
+    if (ticking) return null;
     ticking = true;
     try {
       const day = prod.tick(db, audit, withTransaction);
-      console.log('[invest] simulated day advanced to ' + day);
+      lastTickAt = new Date().toISOString();
+      lastTickError = null;
+      logger.info('invest.tick', { simulated_day: day });
+      return day;
     } catch (e) {
-      console.warn('[invest] tick failed: ' + e.message);
+      lastTickError = e.message;
+      logger.error('invest.tick_failed', { err: e });
+      return null;
     } finally { ticking = false; }
   }
-  const tickTimer = setInterval(runTick, prod.TICK_MS);
-  if (tickTimer.unref) tickTimer.unref();
+  let tickTimer = null;
+  function startTicker() {
+    if (tickTimer) return;
+    tickTimer = setInterval(runTick, prod.TICK_MS);
+    if (tickTimer.unref) tickTimer.unref();
+  }
 
   // ---------- 产品 ----------
   app.get('/api/products', auth, (req, res) => {
@@ -166,7 +176,8 @@ module.exports = function mountInvest(app, ctx) {
     let todayPl = 0;
     const y = db.prepare('SELECT total_cents FROM portfolio_snapshots WHERE user_id = ? AND simulated_day = ?').get(req.user.id, day - 1);
     if (y) {
-      const cfToday = db.prepare("SELECT amount_cents FROM transactions WHERE user_id = ? AND sim_day = ? AND type IN ('bonus','topup','transfer_in','transfer_out','pay')").all(req.user.id, day)
+      const cfToday = db.prepare('SELECT type, amount_cents FROM transactions WHERE user_id = ? AND sim_day = ?').all(req.user.id, day)
+        .filter((r) => metrics.EXTERNAL_FLOW_TYPES.includes(r.type))
         .reduce((s, r) => s + r.amount_cents, 0);
       todayPl = total - y.total_cents - cfToday;
     }
@@ -175,10 +186,7 @@ module.exports = function mountInvest(app, ctx) {
     const addAlloc = (cls, amt) => { alloc[cls] = (alloc[cls] || 0) + amt; };
     for (const h of holdings) addAlloc(CLASS_OF_TYPE[prod.PRODUCT_MAP[h.product_id].type] || 'OTHER', h.market_value_cents);
     const fds = db.prepare("SELECT * FROM fixed_deposits WHERE user_id = ? AND status = 'ACTIVE'").all(req.user.id);
-    for (const fd of fds) {
-      const elapsed = Math.max(0, Math.min(day - fd.start_day, fd.maturity_day - fd.start_day));
-      addAlloc('FIXED', fd.principal_cents + Math.round((fd.principal_cents * (fd.rate_bps / 10000) * elapsed) / 365));
-    }
+    for (const fd of fds) addAlloc('FIXED', fd.principal_cents + prod.accruedInterest(fd, day));
     addAlloc('CASH', v.cash_cents);
     const allocArr = Object.entries(alloc).map(([cls, amt]) => ({
       class: cls, class_zh: CLASS_ZH[cls] || cls, amount_cents: amt,
@@ -194,7 +202,7 @@ module.exports = function mountInvest(app, ctx) {
       unrealized_pl_cents: unrealized, realized_pl_cents: realized,
       allocation: allocArr, allocation_sum_pct: allocSum,
       holdings_top: holdings.slice(0, 5),
-      notice: '模拟演示 — 仅使用虚拟资金，不涉及真实资金、真实交易，不可提现。价格为模拟价格。',
+      notice: '模拟演示：虚拟资金与模拟价格，不涉及真实交易。',
     });
   });
 
@@ -210,22 +218,18 @@ module.exports = function mountInvest(app, ctx) {
   function quote(product, side, qtyMilli) {
     const day = prod.currentDay(db);
     const price = prod.priceAt(product, day);
-    const total = Math.round((qtyMilli * price) / 1000);
+    const total = prod.holdingValue(qtyMilli, price);
     return { day, price_cents: price, total_cents: total, fee_cents: 0 };
   }
   app.post('/api/orders/preview', auth, (req, res) => {
     const p = prod.PRODUCT_MAP[String(req.body.product_id || '')];
-    if (!p || !p.tradeable) return res.status(400).json({ ok: false, error: '产品不存在或不可交易' });
+    if (!p || !p.tradeable) return res.status(400).json({ ok: false, code: 'PRODUCT_NOT_TRADEABLE', error: PRODUCT_NOT_TRADEABLE });
     const side = String(req.body.side || 'BUY').toUpperCase();
-    if (!['BUY', 'SELL'].includes(side)) return res.status(400).json({ ok: false, error: '方向不正确' });
-    let qtyMilli = 0;
-    if (req.body.quantity_milli !== undefined) qtyMilli = Math.round(Number(req.body.quantity_milli));
-    else if (req.body.amount !== undefined) {
-      const amountCents = Math.round(parseFloat(req.body.amount) * 100);
-      if (!Number.isFinite(amountCents) || amountCents <= 0) return res.status(400).json({ ok: false, error: '金额必须大于 0' });
-      qtyMilli = Math.round((amountCents * 1000) / prod.priceAt(p, prod.currentDay(db)));
-    } else if (req.body.quantity !== undefined) qtyMilli = Math.round(parseFloat(req.body.quantity) * 1000);
-    if (!Number.isFinite(qtyMilli) || qtyMilli < 10) return res.status(400).json({ ok: false, error: '数量太小：最少 0.01 份（或金额 $1 以上）' });
+    if (!['BUY', 'SELL'].includes(side)) return res.status(400).json({ ok: false, code: 'SIDE_INVALID', error: '方向不正确' });
+    const pq = parseQuantity(req.body, prod.priceAt(p, prod.currentDay(db)));
+    if (pq.error) return res.status(400).json({ ok: false, code: 'QUANTITY_INVALID', error: pq.error });
+    const qtyMilli = pq.qtyMilli;
+    if (qtyMilli < 10) return res.status(400).json({ ok: false, code: 'QUANTITY_TOO_SMALL', error: '数量太小：最少 0.01 份（或金额 $1 以上）' });
     if (p.type === 'FIXED_DEPOSIT' && side !== 'BUY') return res.status(400).json({ ok: false, error: '定存不支持卖出，到期自动兑付或提前支取' });
     const q = quote(p, side, qtyMilli);
     if (q.total_cents < 100) return res.status(400).json({ ok: false, error: '单笔最少 $1.00' });
@@ -259,7 +263,7 @@ module.exports = function mountInvest(app, ctx) {
     return withTransaction(() => {
       const day = prod.currentDay(db);
       const price = prod.priceAt(product, day);
-      const total = Math.round((qtyMilli * price) / 1000);
+      const total = prod.holdingValue(qtyMilli, price);
       const cash = cashOf(userId);
       let realized = 0;
       if (side === 'BUY') {
@@ -276,9 +280,7 @@ module.exports = function mountInvest(app, ctx) {
       const orderId = order.lastInsertRowid;
       let newCash;
       if (side === 'BUY') {
-        newCash = cash - total;
-        db.prepare('UPDATE wallets SET balance_cents = ?, updated_at = ? WHERE user_id = ?').run(newCash, now(), userId);
-        addTx(userId, 'BUY', -total, newCash, { category: '投资买入', description: `模拟买入 ${product.name} ${qtyMilli / 1000} 份 @ $${fmtC(price)}`, product_id: product.id, order_id: orderId });
+        newCash = wallet.applyCash(db, { userId, delta: -total, type: 'BUY', category: '投资买入', description: `模拟买入 ${product.name} ${qtyMilli / 1000} 份 @ $${fmtC(price)}`, product_id: product.id, order_id: orderId, refType: 'order', refId: orderId }).balance;
         const upd = db.prepare('UPDATE holdings SET quantity_milli = quantity_milli + ? WHERE user_id = ? AND product_id = ?').run(qtyMilli, userId, product.id);
         if (upd.changes === 0) db.prepare('INSERT INTO holdings (user_id, product_id, quantity_milli) VALUES (?,?,?)').run(userId, product.id, qtyMilli);
         db.prepare('INSERT INTO holding_lots (user_id, product_id, order_id, quantity_milli, unit_cost_cents, bought_at) VALUES (?,?,?,?,?,?)')
@@ -291,17 +293,15 @@ module.exports = function mountInvest(app, ctx) {
         for (const lot of lots) {
           if (remaining <= 0) break;
           const take = Math.min(lot.quantity_milli, remaining);
-          costConsumed += Math.round((take * lot.unit_cost_cents) / 1000);
+          costConsumed += prod.holdingValue(take, lot.unit_cost_cents);
           remaining -= take;
           if (take === lot.quantity_milli) db.prepare('DELETE FROM holding_lots WHERE id = ?').run(lot.id);
           else db.prepare('UPDATE holding_lots SET quantity_milli = quantity_milli - ? WHERE id = ?').run(take, lot.id);
         }
         realized = total - costConsumed;
         db.prepare('UPDATE orders SET realized_pl_cents = ? WHERE id = ?').run(realized, orderId);
-        newCash = cash + total;
-        db.prepare('UPDATE wallets SET balance_cents = ?, updated_at = ? WHERE user_id = ?').run(newCash, now(), userId);
-        addTx(userId, 'SELL', total, newCash, { category: '投资卖出', description: `模拟卖出 ${product.name} ${qtyMilli / 1000} 份 @ $${fmtC(price)}，已实现盈亏 ${realized >= 0 ? '+' : '−'}$${fmtC(Math.abs(realized))}`, product_id: product.id, order_id: orderId });
-        const upd = db.prepare('UPDATE holdings SET quantity_milli = quantity_milli - ? WHERE user_id = ? AND product_id = ?').run(qtyMilli, userId, product.id);
+        newCash = wallet.applyCash(db, { userId, delta: total, type: 'SELL', refType: 'order', refId: orderId, category: '投资卖出', description: `模拟卖出 ${product.name} ${qtyMilli / 1000} 份 @ $${fmtC(price)}，已实现盈亏 ${realized >= 0 ? '+' : '−'}$${fmtC(Math.abs(realized))}`, product_id: product.id, order_id: orderId }).balance;
+        db.prepare('UPDATE holdings SET quantity_milli = quantity_milli - ? WHERE user_id = ? AND product_id = ?').run(qtyMilli, userId, product.id);
         const h = db.prepare('SELECT quantity_milli FROM holdings WHERE user_id = ? AND product_id = ?').get(userId, product.id);
         if (h && h.quantity_milli <= 0) db.prepare('DELETE FROM holdings WHERE user_id = ? AND product_id = ?').run(userId, product.id);
       }
@@ -310,25 +310,22 @@ module.exports = function mountInvest(app, ctx) {
     });
   }
 
-  app.post('/api/orders', auth, requirePin, (req, res) => {
+  app.post('/api/orders', auth, requireActive, requirePin, (req, res) => {
     const p = prod.PRODUCT_MAP[String(req.body.product_id || '')];
-    if (!p || !p.tradeable) return res.status(400).json({ ok: false, error: '产品不存在或不可交易' });
+    if (!p || !p.tradeable) return res.status(400).json({ ok: false, code: 'PRODUCT_NOT_TRADEABLE', error: PRODUCT_NOT_TRADEABLE });
     const side = String(req.body.side || 'BUY').toUpperCase();
-    if (!['BUY', 'SELL'].includes(side)) return res.status(400).json({ ok: false, error: '方向不正确' });
-    const idemKey = String(req.body.idempotency_key || '').trim() || crypto.randomUUID();
+    if (!['BUY', 'SELL'].includes(side)) return res.status(400).json({ ok: false, code: 'SIDE_INVALID', error: '方向不正确' });
+    // 幂等键：请求头 Idempotency-Key 优先，兼容 body.idempotency_key；都没有时生成一个（不去重）
+    const idemKey = String(req.get('Idempotency-Key') || req.body.idempotency_key || '').trim().slice(0, 255) || crypto.randomUUID();
     // 幂等：同一键直接返回已存订单，不重复执行
     const existing = db.prepare('SELECT * FROM orders WHERE idempotency_key = ? AND user_id = ?').get(idemKey, req.user.id);
     if (existing) {
       return res.json({ ok: true, duplicate: true, message: '该订单已执行（幂等键重复提交，未重复扣款）', order: existing });
     }
-    let qtyMilli = 0;
-    if (req.body.quantity_milli !== undefined) qtyMilli = Math.round(Number(req.body.quantity_milli));
-    else if (req.body.amount !== undefined) {
-      const amountCents = Math.round(parseFloat(req.body.amount) * 100);
-      if (!Number.isFinite(amountCents) || amountCents <= 0) return res.status(400).json({ ok: false, error: '金额必须大于 0' });
-      qtyMilli = Math.round((amountCents * 1000) / prod.priceAt(p, prod.currentDay(db)));
-    } else if (req.body.quantity !== undefined) qtyMilli = Math.round(parseFloat(req.body.quantity) * 1000);
-    if (!Number.isFinite(qtyMilli) || qtyMilli < 10) return res.status(400).json({ ok: false, error: '数量太小：最少 0.01 份（或金额 $1 以上）' });
+    const pq = parseQuantity(req.body, prod.priceAt(p, prod.currentDay(db)));
+    if (pq.error) return res.status(400).json({ ok: false, code: 'QUANTITY_INVALID', error: pq.error });
+    const qtyMilli = pq.qtyMilli;
+    if (qtyMilli < 10) return res.status(400).json({ ok: false, code: 'QUANTITY_TOO_SMALL', error: '数量太小：最少 0.01 份（或金额 $1 以上）' });
     const q = quote(p, side, qtyMilli);
     if (q.total_cents < 100) return res.status(400).json({ ok: false, error: '单笔最少 $1.00' });
     if (p.type === 'FIXED_DEPOSIT') {
@@ -339,19 +336,21 @@ module.exports = function mountInvest(app, ctx) {
       const day = prod.currentDay(db);
       try {
         const result = withTransaction(() => {
-          const newCash = cash - q.total_cents;
-          db.prepare('UPDATE wallets SET balance_cents = ?, updated_at = ? WHERE user_id = ?').run(newCash, now(), req.user.id);
           const fd = db.prepare('INSERT INTO fixed_deposits (user_id, product_id, principal_cents, rate_bps, start_day, maturity_day, status) VALUES (?,?,?,?,?,?,?)')
             .run(req.user.id, p.id, q.total_cents, p.rateBps, day, day + p.termDays, 'ACTIVE');
-          db.prepare('INSERT INTO orders (user_id, product_id, side, quantity_milli, price_cents, total_cents, fee_cents, status, idempotency_key, created_at, filled_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
+          const ord = db.prepare('INSERT INTO orders (user_id, product_id, side, quantity_milli, price_cents, total_cents, fee_cents, status, idempotency_key, created_at, filled_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
             .run(req.user.id, p.id, 'BUY', qtyMilli, 100, q.total_cents, 0, 'FILLED', idemKey, now(), now());
-          addTx(req.user.id, 'BUY', -q.total_cents, newCash, { category: '定存申购', description: `${p.name} 申购 $${fmtC(q.total_cents)}，年化 ${(p.rateBps / 100).toFixed(2)}%，${p.termDays} 个模拟日后到期`, product_id: p.id });
+          const newCash = wallet.applyCash(db, { userId: req.user.id, delta: -q.total_cents, type: 'BUY', journalType: 'FD_OPEN', category: '定存申购', description: `${p.name} 申购 $${fmtC(q.total_cents)}，年化 ${(p.rateBps / 100).toFixed(2)}%，${p.termDays} 个模拟日后到期`, product_id: p.id, order_id: ord.lastInsertRowid, refType: 'fixed_deposit', refId: fd.lastInsertRowid }).balance;
           prod.snapshotUser(db, req.user.id, day);
           return { fdId: fd.lastInsertRowid, cash_after_cents: newCash };
         });
         audit(req.user.id, req.user.email, 'fd_buy', `${p.name} 申购 $${fmtC(q.total_cents)}`, '');
         return res.json({ ok: true, message: '定存申购成功（模拟）', fixed_deposit_id: result.fdId, total_cents: q.total_cents, cash_after_cents: result.cash_after_cents, maturity_day: day + p.termDays });
-      } catch (e) { console.error('[invest] 定存申购失败:', e && e.message); return res.status(500).json({ ok: false, error: '申购失败，请重试' }); }
+      } catch (e) {
+        if (e instanceof AppError) throw e;
+        req.log.error('invest.fd_buy_failed', { err: e });
+        return res.status(500).json({ ok: false, code: 'INTERNAL', error: '申购失败，请重试', request_id: req.id });
+      }
     }
     try {
       const r = executeOrder(req.user.id, req.user.email, p, side, qtyMilli, idemKey);
@@ -363,7 +362,9 @@ module.exports = function mountInvest(app, ctx) {
         cash_after_cents: r.cash_after_cents, simulated_day: r.day, receipt_note: '模拟成交，无真实交易；手续费 $0。',
       });
     } catch (e) {
-      console.error('[invest] 下单失败:', e && e.stack || e);
+      if (e.code === 'SHORTFALL' || e.code === 'INSUFFICIENT_SHARES') req.log.warn('invest.order_rejected', { code: e.code });
+      else req.log.error('invest.order_failed', { err: e });
+      if (e.code === 'INSUFFICIENT_FUNDS') return res.status(400).json({ ok: false, code: e.code, error: e.message, shortfall_cents: e.details && e.details.shortfall_cents });
       if (e.code === 'SHORTFALL') return res.status(400).json({ ok: false, error: `余额不足：还差 $${fmtC(e.shortfall)}`, shortfall_cents: e.shortfall });
       if (e.code === 'INSUFFICIENT_SHARES') return res.status(400).json({ ok: false, error: '可卖数量不足' });
       return res.status(500).json({ ok: false, error: '下单失败，请重试' });
@@ -383,26 +384,24 @@ module.exports = function mountInvest(app, ctx) {
     res.json({
       ok: true, simulated_day: day,
       items: rows.map((fd) => {
-        const elapsed = Math.max(0, Math.min(day - fd.start_day, fd.maturity_day - fd.start_day));
-        const accrued = Math.round((fd.principal_cents * (fd.rate_bps / 10000) * elapsed) / 365);
-        return { ...fd, accrued_cents: accrued, days_left: Math.max(0, fd.maturity_day - day) };
+        return { ...fd, accrued_cents: prod.accruedInterest(fd, day), days_left: Math.max(0, fd.maturity_day - day) };
       }),
     });
   });
-  app.post('/api/fixed-deposits/:id/break', auth, requirePin, (req, res) => {
+  app.post('/api/fixed-deposits/:id/break', auth, requireActive, requirePin, (req, res) => {
     const fd = db.prepare('SELECT * FROM fixed_deposits WHERE id = ? AND user_id = ?').get(req.params.id, req.user.id);
     if (!fd) return res.status(404).json({ ok: false, error: '定存单不存在' });
     if (fd.status !== 'ACTIVE') return res.status(400).json({ ok: false, error: '该定存单已结束' });
     const day = prod.currentDay(db);
-    const elapsed = Math.max(0, Math.min(day - fd.start_day, fd.maturity_day - fd.start_day));
-    const accrued = Math.round((fd.principal_cents * (fd.rate_bps / 10000) * elapsed) / 365);
+    const accrued = prod.accruedInterest(fd, day);
     const total = fd.principal_cents + accrued;
     withTransaction(() => {
-      const cash = cashOf(req.user.id);
-      const newCash = cash + total;
-      db.prepare('UPDATE wallets SET balance_cents = ?, updated_at = ? WHERE user_id = ?').run(newCash, now(), req.user.id);
-      addTx(req.user.id, 'INTEREST', total, newCash, { category: '定存提前支取', description: `定存提前支取：本金 $${fmtC(fd.principal_cents)} + 已计利息 $${fmtC(accrued)}（模拟）`, product_id: fd.product_id });
-      db.prepare("UPDATE fixed_deposits SET status = 'BROKEN' WHERE id = ?").run(fd.id);
+      // 条件更新防止重复支取：只有仍为 ACTIVE 的定存单才能支取
+      const upd = db.prepare("UPDATE fixed_deposits SET status = 'BROKEN' WHERE id = ? AND status = 'ACTIVE'").run(fd.id);
+      if (!upd.changes) throw new AppError(409, 'FD_ALREADY_CLOSED', '该定存单已结束');
+      // 本金（投资往来）与利息（投资收益）分开入账，口径见 metrics.js
+      wallet.applyCash(db, { userId: req.user.id, delta: fd.principal_cents, type: 'FD_REDEEM', journalType: 'FD_CLOSE', category: '定存提前支取', description: `定存提前支取本金 $${fmtC(fd.principal_cents)}（模拟）`, product_id: fd.product_id, refType: 'fixed_deposit', refId: fd.id });
+      if (accrued > 0) wallet.applyCash(db, { userId: req.user.id, delta: accrued, type: 'INTEREST', category: '定存利息', description: `定存提前支取已计利息 $${fmtC(accrued)}（模拟）`, product_id: fd.product_id, refType: 'fixed_deposit', refId: fd.id });
       prod.snapshotUser(db, req.user.id, day);
     });
     res.json({ ok: true, message: '定存已提前支取（模拟）', principal_cents: fd.principal_cents, interest_cents: accrued, total_cents: total });
@@ -412,12 +411,15 @@ module.exports = function mountInvest(app, ctx) {
   app.get('/api/performance', auth, (req, res) => {
     const range = String(req.query.range || '1M').toUpperCase();
     const day = prod.currentDay(db);
+    // 先刷新当日快照：转账、付款、充值等非投资操作不会更新快照，若不刷新，期末值会滞后于当日资金流，导致回报率失真
+    withTransaction(() => prod.snapshotUser(db, req.user.id, day));
     const windowDays = range === '1D' ? 2 : range === '1W' ? 8 : range === '1M' ? 31 : range === '1Y' ? 366 : 10000;
     const snaps = db.prepare('SELECT * FROM portfolio_snapshots WHERE user_id = ? ORDER BY simulated_day ASC').all(req.user.id);
     const series = snaps.slice(-windowDays);
     // 外部资金流（按模拟日）：bonus/topup/transfer_in 为流入（+），transfer_out/pay 为流出（−）
     const flows = {};
-    const flowRows = db.prepare("SELECT sim_day, type, amount_cents FROM transactions WHERE user_id = ? AND type IN ('bonus','topup','transfer_in','transfer_out','pay')").all(req.user.id);
+    const flowRows = db.prepare('SELECT sim_day, type, amount_cents FROM transactions WHERE user_id = ?').all(req.user.id)
+      .filter((r) => metrics.EXTERNAL_FLOW_TYPES.includes(r.type));
     for (const f of flowRows) {
       const d = f.sim_day === null || f.sim_day === undefined ? 0 : f.sim_day;
       flows[d] = (flows[d] || 0) + f.amount_cents;
@@ -467,7 +469,8 @@ module.exports = function mountInvest(app, ctx) {
       twr_pct: twr, twr_method: 'TWR 时间加权回报 = [(1+R1)×(1+R2)×…×(1+Rn)] − 1；衡量投资策略本身，剔除资金进出时点影响，适合与基准对比。',
       mwr_pct: mwr, mwr_method: 'MWR 货币加权回报（Modified Dietz）R = (EV − BV − CF) / (BV + Σ CFi·Wi)；衡量这笔钱实际经历的回报，包含您追加/取出资金的时点影响。',
       simple_return_pct: simpleReturn,
-      simple_method: '简单回报 = (当前总资产 − 累计净投入) / 累计净投入；累计净投入 = 体验金 + 演示充值 + 转入 − 转出 − 付款。',
+      simple_method: '简单回报 = (当前总资产 − 累计净投入) / 累计净投入；累计净投入 = 收入 − 支出（' + metrics.DEFINITIONS.inflow + '；' + metrics.DEFINITIONS.outflow + '）。',
+      period: { from_day: series.length ? series[0].day : day, to_day: day, label: series.length ? `模拟日 day-${series[0].simulated_day} 至 day-${series[series.length - 1].simulated_day}` : '暂无数据' },
       income: {
         dividends_cents: divRows.reduce((s, r) => s + r.amount_cents, 0),
         interest_cents: intRows.reduce((s, r) => s + r.amount_cents, 0),
@@ -526,8 +529,9 @@ module.exports = function mountInvest(app, ctx) {
       if (!Number.isFinite(pct) || pct <= 0) return res.status(400).json({ ok: false, error: '请输入日涨跌幅阈值（%）' });
       threshold = Math.round(pct * 100); // 存基点
     } else {
-      threshold = Math.round(parseFloat(req.body.threshold_price) * 100);
-      if (!Number.isFinite(threshold) || threshold <= 0) return res.status(400).json({ ok: false, error: '请输入触发价格' });
+      const r = money.parseAmount(req.body.threshold_price);
+      if (!r.ok) return res.status(400).json({ ok: false, code: r.code, error: '触发价格：' + r.message });
+      threshold = r.cents;
     }
     const ex = db.prepare('SELECT id FROM alerts WHERE user_id = ? AND product_id = ? AND condition = ? AND status = ?').get(req.user.id, p.id, condition, 'ACTIVE');
     if (ex) return res.status(400).json({ ok: false, error: '该产品已有同类生效提醒（每目标一个提醒）' });
@@ -589,13 +593,10 @@ module.exports = function mountInvest(app, ctx) {
       if (cls) cur[cls] = (cur[cls] || 0) + h.market_value_cents;
     }
     const fds = db.prepare("SELECT * FROM fixed_deposits WHERE user_id = ? AND status = 'ACTIVE'").all(userId);
-    for (const fd of fds) {
-      const day = prod.currentDay(db);
-      const elapsed = Math.max(0, Math.min(day - fd.start_day, fd.maturity_day - fd.start_day));
-      cur.FIXED += fd.principal_cents + Math.round((fd.principal_cents * (fd.rate_bps / 10000) * elapsed) / 365);
-    }
+    const fdDay = prod.currentDay(db);
+    for (const fd of fds) cur.FIXED += fd.principal_cents + prod.accruedInterest(fd, fdDay);
     const items = Object.keys(target).map((cls) => {
-      const targetAmt = Math.round((total * target[cls]) / 100);
+      const targetAmt = money.mulDiv(total, Math.round(target[cls] * 100), 10000); // 目标权重最多 2 位小数
       const curAmt = cur[cls] || 0;
       const driftPct = total ? ((curAmt - targetAmt) / total) * 100 : 0;
       const band = Math.min(5, 0.25 * target[cls]); // 5/25 规则：min(5pp, 25%×目标)
@@ -632,7 +633,7 @@ module.exports = function mountInvest(app, ctx) {
     }
     res.json({ ok: true, ...plan, suggestions, rule: '5/25 规则：当 |偏离| > min(5 个百分点, 25%×目标权重) 时提示再平衡；例如目标 60% 的类别区间为 55–65%，目标 5% 的类别区间为 3.75–6.25%。再平衡仅为练习建议，不构成投资建议，不自动交易。' });
   });
-  app.post('/api/rebalance/execute', auth, requirePin, (req, res) => {
+  app.post('/api/rebalance/execute', auth, requireActive, requirePin, (req, res) => {
     const plan = rebalancePlan(req.user.id);
     if (plan.error) return res.status(400).json({ ok: false, error: plan.error });
     const results = [];
@@ -646,7 +647,7 @@ module.exports = function mountInvest(app, ctx) {
         const cash = cashOf(req.user.id);
         const amt = Math.min(it.delta_cents, cash);
         if (amt < 100) { results.push({ class: it.class, side: 'BUY', skipped: true, reason: '现金不足（还差 $' + fmtC(it.delta_cents - cash) + '）' }); continue; }
-        const qtyMilli = Math.round((amt * 1000) / prod.priceAt(cand, prod.currentDay(db)));
+        const qtyMilli = money.mulDiv(amt, 1000, prod.priceAt(cand, prod.currentDay(db)));
         try {
           const r = executeOrder(req.user.id, req.user.email, cand, 'BUY', qtyMilli, crypto.randomUUID());
           results.push({ class: it.class, side: 'BUY', product_id: cand.id, name: cand.name, amount_cents: r.total_cents, order_id: r.orderId });
@@ -658,7 +659,7 @@ module.exports = function mountInvest(app, ctx) {
         for (const h of hs) {
           if (need <= 0) break;
           const amt = Math.min(h.market_value_cents, need);
-          const qtyMilli = Math.round((amt * 1000) / h.price_cents);
+          const qtyMilli = money.mulDiv(amt, 1000, h.price_cents);
           const sellQty = Math.min(qtyMilli, h.quantity_milli);
           if (sellQty < 10) continue;
           try {
@@ -688,10 +689,11 @@ module.exports = function mountInvest(app, ctx) {
   });
   app.post('/api/goals', auth, (req, res) => {
     const name = String(req.body.name || '').trim().slice(0, 40);
-    const targetCents = Math.round(parseFloat(req.body.target_amount) * 100);
     const targetDate = String(req.body.target_date || '').slice(0, 10);
     if (!name) return res.status(400).json({ ok: false, error: '请输入目标名称' });
-    if (!Number.isFinite(targetCents) || targetCents <= 0) return res.status(400).json({ ok: false, error: '目标金额必须大于 0' });
+    const tr = money.parseAmount(req.body.target_amount);
+    if (!tr.ok) return res.status(400).json({ ok: false, code: tr.code, error: '目标金额：' + tr.message });
+    const targetCents = tr.cents;
     const r = db.prepare('INSERT INTO goals (user_id, name, target_cents, target_date, created_at) VALUES (?,?,?,?,?)')
       .run(req.user.id, name, targetCents, targetDate, now());
     res.json({ ok: true, goal_id: r.lastInsertRowid });
@@ -713,6 +715,8 @@ module.exports = function mountInvest(app, ctx) {
       portfolio_snapshots: db.prepare('SELECT * FROM portfolio_snapshots WHERE user_id = ? ORDER BY simulated_day ASC').all(req.user.id),
       goals: db.prepare('SELECT * FROM goals WHERE user_id = ?').all(req.user.id),
       fixed_deposits: db.prepare('SELECT * FROM fixed_deposits WHERE user_id = ?').all(req.user.id),
+      payments: db.prepare('SELECT * FROM payments WHERE user_id = ?').all(req.user.id),
+      withdrawals: db.prepare('SELECT * FROM withdrawals WHERE user_id = ?').all(req.user.id),
     };
     res.json({ ok: true, export: data });
   });
@@ -738,25 +742,31 @@ module.exports = function mountInvest(app, ctx) {
       } catch (e2) { res.status(500).json({ ok: false, error: '备份失败：' + e2.message }); }
     }
   });
-  app.post('/api/demo/reset', auth, (req, res) => {
+  app.post('/api/demo/reset', auth, requireActive, (req, res) => {
     const password = String(req.body.password || '');
     const row = db.prepare('SELECT password_salt, password_hash FROM users WHERE id = ?').get(req.user.id);
     if (!sec.verifyPassword(password, row.password_salt, row.password_hash)) return res.status(403).json({ ok: false, error: '登录密码不正确' });
     const BONUS = parseInt(process.env.WELCOME_BONUS_CENTS || '5000', 10);
+    const pendingW = db.prepare("SELECT COUNT(*) AS c FROM withdrawals WHERE user_id = ? AND status = 'PENDING'").get(req.user.id).c;
+    if (pendingW) return res.status(409).json({ ok: false, code: 'PENDING_WITHDRAWAL', error: '有待审核的提现申请，审核完成后才能重置演示', request_id: req.id });
     withTransaction(() => {
+      // 账本只追加不删除：先用冲正分录把钱包清零，再发放体验金；其余演示历史（含流水明细）按原逻辑清空
       for (const t of ['transactions', 'holding_lots', 'orders', 'holdings', 'portfolio_snapshots', 'dividends', 'watchlist', 'alerts', 'goals', 'fixed_deposits']) { // holding_lots 引用 orders，必须先删
         db.prepare(`DELETE FROM ${t} WHERE user_id = ?`).run(req.user.id);
       }
-      db.prepare('UPDATE wallets SET balance_cents = ?, updated_at = ? WHERE user_id = ?').run(BONUS, now(), req.user.id);
-      addTx(req.user.id, 'bonus', BONUS, BONUS, { category: '体验金', description: '演示重置：恢复 $50.00 虚拟体验金（不可提现），历史已清空' });
+      const current = cashOf(req.user.id);
+      if (current !== 0) wallet.applyCash(db, { userId: req.user.id, delta: -current, type: 'demo_reset', allowNegative: true, category: '演示重置', description: '演示重置：清空余额' });
+      if (BONUS > 0) wallet.applyCash(db, { userId: req.user.id, delta: BONUS, type: 'bonus', category: '体验金', description: `演示重置：恢复体验金 $${fmtC(BONUS)}（虚拟资金）` });
       prod.backfillCashHistory(db, req.user.id, BONUS);
     });
     audit(req.user.id, req.user.email, 'demo_reset', '演示重置，恢复 $50 体验金', '');
-    res.json({ ok: true, message: '演示已重置，恢复 $50.00 虚拟体验金', balance_cents: BONUS });
+    res.json({ ok: true, message: `演示已重置，恢复体验金 $${fmtC(BONUS)}`, balance_cents: BONUS });
   });
 
   // 供 server.js /api/health 使用
   return {
-    status: () => ({ simulated_day: prod.currentDay(db), products: prod.PRODUCTS.length, tick: '每小时推进 1 个模拟日' }),
+    status: () => ({ ok: true, simulated_day: prod.currentDay(db), products: prod.PRODUCTS.length, tick: '每小时推进 1 个模拟日', last_tick_at: lastTickAt, last_tick_error: lastTickError }),
+    runTick,
+    startTicker,
   };
 };

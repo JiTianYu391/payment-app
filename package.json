@@ -1,10 +1,17 @@
 {
-  "name": "payment-app-v2",
-  "version": "2.0.0",
-  "description": "支付管理 + 投资演示 v2 — 正式版（虚拟资金，不可提现，不接入真实支付与真实交易）",
+  "name": "spacepay",
+  "version": "3.0.0",
+  "description": "SpacePay — 支付与资金管理（演示环境：虚拟资金、模拟出款，不接入真实支付渠道）",
   "main": "app.js",
-  "engines": { "node": ">=22.5" },
-  "scripts": { "start": "node app.js", "dev": "node --watch src/server.js", "backup": "node scripts/backup.js" },
+  "engines": {
+    "node": ">=22.5"
+  },
+  "scripts": {
+    "start": "node app.js",
+    "dev": "node --watch src/server.js",
+    "test": "node --test --test-reporter=spec \"test/**/*.test.js\"",
+    "backup": "node scripts/backup.js"
+  },
   "dependencies": {
     "cookie-parser": "^1.4.6",
     "cors": "^2.8.5",
