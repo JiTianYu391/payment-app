@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>结账流程 · SpacePay 开发者文档</title>
+<meta name="description" content="SpacePay 结账流程：checkout_url 跳转、付款人登录与支付 PIN、成功/取消跳转与 Webhook。">
+<meta name="theme-color" content="#FFFFFF" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#141920" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="/brand/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/styles.css">
+<link rel="stylesheet" href="/docs/docs.css">
+<script>try { var t = localStorage.getItem('spacepay_theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}</script>
+</head>
+<body class="doc-body" data-page="checkout">
+<header class="doc-header" id="docHeader"></header>
+<div class="doc-scrim" id="docScrim"></div>
+<div class="doc-shell">
+  <aside class="doc-side" id="docSide">
+    <div class="doc-search"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="docSearch" type="search" placeholder="搜索文档" aria-label="搜索文档"></div>
+    <nav class="doc-nav" id="docNav"></nav>
+  </aside>
+  <main class="doc-main">
+    <article class="doc-article">
+      <h1>结账流程</h1>
+      <p class="lede">SpacePay 托管结账页：商户创建支付后把 <code>checkout_url</code> 交给付款人，付款人登录并输入支付 PIN 完成付款。商户服务端不需要接触付款人的密码或 PIN。</p>
+
+      <h2 id="flow">完整流程</h2>
+      <div class="steps">
+        <div class="step"><div><b>服务端创建支付</b><p>调用 <code>POST /api/v1/payments</code>，得到 <code>payment.id</code> 与 <code>checkout_url</code>。</p></div></div>
+        <div class="step"><div><b>浏览器跳转</b><p>把付款人浏览器重定向到 <code>checkout_url</code>。页面会显示商户、金额与描述。</p></div></div>
+        <div class="step"><div><b>付款人登录并确认</b><p>未登录时先登录 SpacePay；已登录则输入 6 位支付 PIN 并确认付款。</p></div></div>
+        <div class="step"><div><b>服务端收到 Webhook</b><p>付款成功推送 <code>payment.succeeded</code>；校验签名后发货。</p></div></div>
+        <div class="step"><div><b>浏览器跳回</b><p>付款成功跳到 <code>success_url</code>，取消跳到 <code>cancel_url</code>。</p></div></div>
+      </div>
+
+      <div class="callout danger"><span class="ico">!</span><span>不要用浏览器跳回 <code>success_url</code> 作为支付成功的依据——跳转可能被关闭、网络中断或被伪造。以 Webhook 为准。</span></div>
+
+      <h2 id="how-to-redirect">如何跳转</h2>
+      <div class="codeblock">
+        <div class="code-head"><div class="lang-tabs"><button class="active" data-lang="node">Node.js</button><button data-lang="python">Python</button><button data-lang="curl">curl</button></div><button class="copy">复制</button></div>
+<pre data-lang="node">// 创建支付后，把地址返回给前端，由前端跳转
+const resp = await fetch('https://your-domain/api/v1/payments', {
+  method: 'POST',
+  headers: {
+    Authorization: `Bearer ${process.env.SPACEPAY_KEY}`,
+    'Content-Type': 'application/json',
+  },
+  body: JSON.stringify({ amount: '12.34', reference: 'order-2026-0001' }),
+});
+const { payment } = await resp.json();
+res.redirect(payment.checkout_url);</pre>
+<pre data-lang="python" hidden>import os
+import requests
+from flask import redirect
+
+resp = requests.post(
+    "https://your-domain/api/v1/payments",
+    headers={"Authorization": f"Bearer {os.environ['SPACEPAY_KEY']}"},
+    json={"amount": "12.34", "reference": "order-2026-0001"},
+    timeout=15,
+)
+payment = resp.json()["payment"]
+return redirect(payment["checkout_url"])</pre>
+<pre data-lang="curl" hidden># 创建支付并取出结账链接
+URL=$(curl -s -X POST https://your-domain/api/v1/payments \
+  -H "Authorization: Bearer $SPACEPAY_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"amount":"12.34","reference":"order-2026-0001"}' \
+  | python3 -c "import sys,json;print(json.load(sys.stdin)['payment']['checkout_url'])")
+echo "$URL"</pre>
+      </div>
+
+      <h2 id="web-endpoints">结账页用到的接口</h2>
+      <p>以下接口由托管结账页在付款人浏览器中调用，<b>商户服务端不需要调用</b>。列出是为了便于排查和自建收银台。</p>
+
+      <h3 id="checkout-view">读取支付信息</h3>
+      <div class="endpoint"><span class="method get">GET</span><span class="path">/api/checkout/:token</span><span class="note">公开</span></div>
+      <div class="codeblock">
+        <div class="code-head"><div class="lang-tabs"><button class="active" data-lang="json">JSON</button></div><button class="copy">复制</button></div>
+<pre data-lang="json">{
+  "ok": true,
+  "payment": {
+    "id": "pay_1",
+    "reference": "order-2026-0001",
+    "amount_cents": 1234,
+    "amount": "12.34",
+    "currency": "USD",
+    "status": "CREATED",
+    "description": "拿铁两杯",
+    "customer_email": null,
+    "merchant": { "name": "蓝湾咖啡", "website": "https://lanwan.example" },
+    "created_at": 1762800000000,
+    "expires_at": 1762801800000
+  }
+}</pre>
+      </div>
+
+      <h3 id="checkout-pay">付款</h3>
+      <div class="endpoint"><span class="method post">POST</span><span class="path">/api/checkout/:token/pay</span><span class="note">需要付款人登录 + 支付 PIN</span></div>
+      <p>请求体：<code>{"pin":"123456"}</code>。成功返回支付单、付款后余额与 <code>success_url</code>。</p>
+      <ul>
+        <li>未登录返回 <code>401 UNAUTHENTICATED</code>；结账页会先跳转登录：<code>/?next=/pay.html?token=…</code>。</li>
+        <li>支付单设置了 <code>customer_email</code> 时，其他账户付款返回 <code>403 CUSTOMER_MISMATCH</code>。</li>
+        <li>PIN 错误返回 <code>403 PIN_INCORRECT</code>；连续错误会锁定并返回 <code>423 PIN_LOCKED</code>。</li>
+      </ul>
+
+      <h3 id="checkout-cancel">取消</h3>
+      <div class="endpoint"><span class="method post">POST</span><span class="path">/api/checkout/:token/cancel</span><span class="note">需要付款人登录</span></div>
+      <p>把支付单置为 <code>CANCELED</code>。已支付的支付单不能取消，返回 <code>409 PAYMENT_NOT_CANCELABLE</code>。</p>
+
+      <h2 id="urls">成功与取消地址</h2>
+      <table class="doc-table">
+        <thead><tr><th>字段</th><th>行为</th></tr></thead>
+        <tbody>
+          <tr><td><code>success_url</code></td><td>付款成功后结账页跳转的地址；未设置时停留在成功页</td></tr>
+          <tr><td><code>cancel_url</code></td><td>付款人取消后跳转的地址；未设置时停留在取消页</td></tr>
+        </tbody>
+      </table>
+      <p>这两个地址只影响浏览器体验，不影响支付状态。不要在这两个页面执行发货、加余额等不可逆操作。</p>
+
+      <h2 id="expiry">有效期与失败处理</h2>
+      <ul>
+        <li>支付单创建后 30 分钟内有效，过期后结账页显示「链接已过期」，需要重新创建。</li>
+        <li>商户被暂停时，结账页不能付款（<code>MERCHANT_INACTIVE</code>）。</li>
+        <li>同一支付单只能成功付款一次；重复付款返回 <code>409 PAYMENT_NOT_PAYABLE</code>。</li>
+      </ul>
+      <div class="callout info"><span class="ico">i</span><span>如果你想在自己的页面内完成支付，需要自行处理登录会话、PIN 输入与错误提示。建议直接使用托管的 <code>checkout_url</code>，减少合规与实现成本。</span></div>
+    </article>
+    <nav class="prevnext" id="pageNav"></nav>
+  </main>
+</div>
+<aside class="doc-toc" id="docToc"></aside>
+<script src="/docs/docs.js" defer></script>
+</body>
+</html>

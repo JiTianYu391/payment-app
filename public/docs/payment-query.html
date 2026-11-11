@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>查询支付与列表 · SpacePay 开发者文档</title>
+<meta name="description" content="GET /api/v1/payments/:id 与 GET /api/v1/payments：查询单笔支付、分页列表与退款记录。">
+<meta name="theme-color" content="#FFFFFF" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#141920" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="/brand/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/styles.css">
+<link rel="stylesheet" href="/docs/docs.css">
+<script>try { var t = localStorage.getItem('spacepay_theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}</script>
+</head>
+<body class="doc-body" data-page="payment-query">
+<header class="doc-header" id="docHeader"></header>
+<div class="doc-scrim" id="docScrim"></div>
+<div class="doc-shell">
+  <aside class="doc-side" id="docSide">
+    <div class="doc-search"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="docSearch" type="search" placeholder="搜索文档" aria-label="搜索文档"></div>
+    <nav class="doc-nav" id="docNav"></nav>
+  </aside>
+  <main class="doc-main">
+    <article class="doc-article">
+      <h1>查询支付与列表</h1>
+      <p class="lede">查询单笔支付（含退款记录），或按状态分页列出商户的全部支付。用于订单详情、对账和补偿 Webhook 丢失的场景。</p>
+
+      <h2 id="retrieve">查询单笔支付</h2>
+      <div class="endpoint"><span class="method get">GET</span><span class="path">/api/v1/payments/:id</span><span class="note">需要 API Key</span></div>
+      <p><code>:id</code> 接受 <code>pay_1</code> 或纯数字 <code>1</code>。只能查询本商户的支付单，其他商户的编号返回 <code>404 PAYMENT_NOT_FOUND</code>。</p>
+
+      <h3 id="retrieve-request">请求示例</h3>
+      <div class="codeblock">
+        <div class="code-head"><div class="lang-tabs"><button class="active" data-lang="curl">curl</button><button data-lang="python">Python</button><button data-lang="node">Node.js</button></div><button class="copy">复制</button></div>
+<pre data-lang="curl">curl "https://your-domain/api/v1/payments/pay_1" \
+  -H "Authorization: Bearer $SPACEPAY_KEY"</pre>
+<pre data-lang="python" hidden>import os
+import requests
+
+resp = requests.get(
+    "https://your-domain/api/v1/payments/pay_1",
+    headers={"Authorization": f"Bearer {os.environ['SPACEPAY_KEY']}"},
+    timeout=15,
+)
+print(resp.json())</pre>
+<pre data-lang="node" hidden>const resp = await fetch('https://your-domain/api/v1/payments/pay_1', {
+  headers: { Authorization: `Bearer ${process.env.SPACEPAY_KEY}` },
+});
+const data = await resp.json();</pre>
+      </div>
+
+      <h3 id="retrieve-response">响应示例</h3>
+      <div class="codeblock">
+        <div class="code-head"><div class="lang-tabs"><button class="active" data-lang="json">JSON</button></div><button class="copy">复制</button></div>
+<pre data-lang="json">{
+  "ok": true,
+  "payment": {
+    "id": "pay_1",
+    "numeric_id": 1,
+    "reference": "order-2026-0001",
+    "amount_cents": 1234,
+    "amount": "12.34",
+    "currency": "USD",
+    "status": "PARTIALLY_REFUNDED",
+    "refunded_cents": 234,
+    "refundable_cents": 1000,
+    "description": "拿铁两杯",
+    "customer_email": "buyer@example.com",
+    "metadata": { "sku": "latte" },
+    "checkout_url": "https://your-domain/pay.html?token=…",
+    "created_at": 1762800000000,
+    "paid_at": 1762800030000,
+    "expires_at": 1762801800000
+  },
+  "refunds": [
+    {
+      "id": "ref_1",
+      "payment_id": 1,
+      "amount_cents": 234,
+      "amount": "2.34",
+      "reason": "部分退单",
+      "status": "SUCCEEDED",
+      "created_at": 1762800200000
+    }
+  ]
+}</pre>
+      </div>
+
+      <h2 id="list">支付列表</h2>
+      <div class="endpoint"><span class="method get">GET</span><span class="path">/api/v1/payments</span><span class="note">需要 API Key</span></div>
+      <table class="doc-table">
+        <thead><tr><th>参数</th><th>类型</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td><code>limit</code><span class="opt">可选</span></td><td>integer</td><td>每页条数，1–100，默认 20</td></tr>
+          <tr><td><code>starting_after</code><span class="opt">可选</span></td><td>string</td><td>游标：上一页最后一个 <code>id</code>（如 <code>pay_100</code>），返回比它更早的记录</td></tr>
+          <tr><td><code>status</code><span class="opt">可选</span></td><td>string</td><td>按状态筛选：<code>CREATED</code> / <code>SUCCEEDED</code> / <code>PARTIALLY_REFUNDED</code> / <code>REFUNDED</code> / <code>CANCELED</code> / <code>EXPIRED</code></td></tr>
+        </tbody>
+      </table>
+      <p>结果按创建时间倒序（最新的在前）。响应中的 <code>has_more</code> 与 <code>next_starting_after</code> 用于翻页：</p>
+      <div class="codeblock">
+        <div class="code-head"><div class="lang-tabs"><button class="active" data-lang="json">JSON</button></div><button class="copy">复制</button></div>
+<pre data-lang="json">{
+  "ok": true,
+  "items": [ { "id": "pay_100", "status": "SUCCEEDED", "amount_cents": 1234 } ],
+  "has_more": true,
+  "next_starting_after": "pay_100"
+}</pre>
+      </div>
+
+      <h3 id="list-example">翻页示例</h3>
+      <div class="codeblock">
+        <div class="code-head"><div class="lang-tabs"><button class="active" data-lang="python">Python</button><button data-lang="node">Node.js</button></div><button class="copy">复制</button></div>
+<pre data-lang="python">import os
+import requests
+
+key = os.environ["SPACEPAY_KEY"]
+cursor = None
+while True:
+    params = {"limit": 100}
+    if cursor:
+        params["starting_after"] = cursor
+    data = requests.get(
+        "https://your-domain/api/v1/payments",
+        headers={"Authorization": f"Bearer {key}"},
+        params=params,
+        timeout=15,
+    ).json()
+    for p in data["items"]:
+        print(p["id"], p["status"], p["amount"])
+    if not data["has_more"]:
+        break
+    cursor = data["next_starting_after"]</pre>
+<pre data-lang="node" hidden>let cursor = null;
+for (;;) {
+  const qs = new URLSearchParams({ limit: '100' });
+  if (cursor) qs.set('starting_after', cursor);
+  const data = await (await fetch(`https://your-domain/api/v1/payments?${qs}`, {
+    headers: { Authorization: `Bearer ${process.env.SPACEPAY_KEY}` },
+  })).json();
+  for (const p of data.items) console.log(p.id, p.status, p.amount);
+  if (!data.has_more) break;
+  cursor = data.next_starting_after;
+}</pre>
+      </div>
+
+      <h2 id="use-cases">常见用法</h2>
+      <ul>
+        <li><b>对账</b>：按天拉取 <code>SUCCEEDED</code> 的支付，与自己的订单表比对。</li>
+        <li><b>补偿</b>：Webhook 丢失时，用 <code>reference</code> 找到对应支付并主动查询状态。</li>
+        <li><b>客服</b>：根据订单号或支付编号查看退款记录与可退金额。</li>
+      </ul>
+      <div class="callout info"><span class="ico">i</span><span>列表接口只返回当前商户的数据。分页使用游标而不是页码，数据量大时也能稳定遍历。</span></div>
+    </article>
+    <nav class="prevnext" id="pageNav"></nav>
+  </main>
+</div>
+<aside class="doc-toc" id="docToc"></aside>
+<script src="/docs/docs.js" defer></script>
+</body>
+</html>

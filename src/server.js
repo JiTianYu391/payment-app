@@ -759,8 +759,16 @@ function createApp() {
 
   // 未知 API 返回 JSON 404，其余路径交给前端单页
   app.use('/api', (req, res) => sendError(req, res, 404, 'NOT_FOUND', '接口不存在'));
-  // 独立的开发者文档、商户后台与结账页（不经过主 SPA）
-  app.get('/developers', (req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'developers.html')));
+  // 开发者文档站（独立静态页面，不经过主 SPA）
+  const DOCS_DIR = path.join(__dirname, '..', 'public', 'docs');
+  const DOCS_PAGES = new Set(['payments', 'payment-query', 'refunds', 'settlement', 'webhooks', 'checkout', 'errors', 'limits', 'security', 'changelog']);
+  app.get(['/docs', '/docs/'], (req, res) => res.sendFile(path.join(DOCS_DIR, 'index.html')));
+  app.get('/docs/:page', (req, res) => {
+    if (!DOCS_PAGES.has(req.params.page)) return res.redirect(302, '/docs');
+    return res.sendFile(path.join(DOCS_DIR, `${req.params.page}.html`));
+  });
+  app.get('/developers', (req, res) => res.redirect(301, '/docs'));
+  // 商户后台与结账页
   app.get('/merchant', (req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'merchant.html')));
   app.get('/pay', (req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'pay.html')));
   app.get('*', (req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'index.html')));

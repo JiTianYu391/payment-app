@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>更新日志 · SpacePay 开发者文档</title>
+<meta name="description" content="SpacePay 开放平台接口与文档的变更记录。">
+<meta name="theme-color" content="#FFFFFF" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#141920" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="/brand/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/styles.css">
+<link rel="stylesheet" href="/docs/docs.css">
+<script>try { var t = localStorage.getItem('spacepay_theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}</script>
+</head>
+<body class="doc-body" data-page="changelog">
+<header class="doc-header" id="docHeader"></header>
+<div class="doc-scrim" id="docScrim"></div>
+<div class="doc-shell">
+  <aside class="doc-side" id="docSide">
+    <div class="doc-search"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="docSearch" type="search" placeholder="搜索文档" aria-label="搜索文档"></div>
+    <nav class="doc-nav" id="docNav"></nav>
+  </aside>
+  <main class="doc-main">
+    <article class="doc-article">
+      <h1>更新日志</h1>
+      <p class="lede">开放平台接口、Webhook 与文档的变更记录。破坏性变更会提前标注。</p>
+
+      <h2 id="v4">2026-11-11 · v4.0.0</h2>
+      <p>首个公开版本，包含完整的商户接入能力。</p>
+      <h3 id="v4-api">接口</h3>
+      <ul>
+        <li><code>POST /api/v1/payments</code> 创建支付，支持 <code>Idempotency-Key</code> 与 <code>reference</code> 去重。</li>
+        <li><code>GET /api/v1/payments/:id</code> 查询支付与退款记录。</li>
+        <li><code>GET /api/v1/payments</code> 游标分页列表，支持按状态筛选。</li>
+        <li><code>POST /api/v1/payments/:id/refund</code> 部分或全额退款。</li>
+        <li><code>GET /api/v1/balance</code> 可结算余额与在途结算。</li>
+        <li><code>GET/POST /api/v1/payouts</code> 结算提现申请与记录。</li>
+        <li>结账接口：<code>GET /api/checkout/:token</code>、<code>POST /api/checkout/:token/pay</code>、<code>POST /api/checkout/:token/cancel</code>。</li>
+      </ul>
+      <h3 id="v4-webhook">Webhook</h3>
+      <ul>
+        <li>事件 <code>payment.succeeded</code> 与 <code>payment.refunded</code>。</li>
+        <li>HMAC-SHA256 签名（<code>X-SpacePay-Signature</code>），6 次指数退避重试，后台可手动重投。</li>
+        <li>投递前解析域名并拒绝内网目标。</li>
+      </ul>
+      <h3 id="v4-console">商户后台与安全</h3>
+      <ul>
+        <li>商户入驻审核、API Key 创建与吊销、Webhook 配置、支付与结算管理。</li>
+        <li>API Key 只保存哈希；每个 Key 独立限流；请求日志可追溯。</li>
+        <li>付款人使用 httpOnly 会话与支付 PIN，可选 TOTP 两步验证。</li>
+      </ul>
+      <h3 id="v4-docs">文档</h3>
+      <ul>
+        <li>文档站上线：快速开始、接口参考、Webhook、错误码、限流与幂等、密钥安全。</li>
+        <li>所有接口提供 curl / Python / Node.js 示例。</li>
+      </ul>
+
+      <h2 id="compat">兼容性说明</h2>
+      <ul>
+        <li>接口路径与字段遵循语义化版本：新增字段属于兼容变更，删除或改名会提升主版本并在本页标注。</li>
+        <li>金额字段同时提供整数分（<code>*_cents</code>）与十进制字符串，建议以整数分为准。</li>
+        <li>错误响应的 <code>code</code> 是稳定标识，<code>error</code> 文案可能优化，请不要依赖文案匹配。</li>
+      </ul>
+
+      <div class="callout info"><span class="ico">i</span><span>文档最后更新：2026-11-11。遇到与文档不一致的行为，请附上 <code>request_id</code> 反馈。</span></div>
+    </article>
+    <nav class="prevnext" id="pageNav"></nav>
+  </main>
+</div>
+<aside class="doc-toc" id="docToc"></aside>
+<script src="/docs/docs.js" defer></script>
+</body>
+</html>

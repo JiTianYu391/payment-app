@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>密钥与安全 · SpacePay 开发者文档</title>
+<meta name="description" content="SpacePay API 密钥管理、轮换、Webhook 密钥与安全实践。">
+<meta name="theme-color" content="#FFFFFF" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#141920" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="/brand/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/styles.css">
+<link rel="stylesheet" href="/docs/docs.css">
+<script>try { var t = localStorage.getItem('spacepay_theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}</script>
+</head>
+<body class="doc-body" data-page="security">
+<header class="doc-header" id="docHeader"></header>
+<div class="doc-scrim" id="docScrim"></div>
+<div class="doc-shell">
+  <aside class="doc-side" id="docSide">
+    <div class="doc-search"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="docSearch" type="search" placeholder="搜索文档" aria-label="搜索文档"></div>
+    <nav class="doc-nav" id="docNav"></nav>
+  </aside>
+  <main class="doc-main">
+    <article class="doc-article">
+      <h1>密钥与安全</h1>
+      <p class="lede">API Key 是商户服务端的凭据，等同于你的账户权限。请按下面的方式保管、轮换和排查。</p>
+
+      <h2 id="key-format">密钥格式</h2>
+      <div class="codeblock">
+        <div class="code-head"><div class="lang-tabs"><button class="active" data-lang="text">格式</button></div><button class="copy">复制</button></div>
+<pre data-lang="text">sp_live_&lt;key_id&gt;_&lt;secret&gt;
+sp_test_&lt;key_id&gt;_&lt;secret&gt;
+
+key_id  16 位十六进制，用于索引
+secret  32 位随机串，只在创建时返回一次</pre>
+      </div>
+      <p>服务端只保存 <code>secret</code> 的 SHA-256 哈希，无法再次读出。丢失后只能吊销并重新创建。</p>
+
+      <h2 id="storage">保管</h2>
+      <ul>
+        <li>放在服务端环境变量或密钥管理服务中，例如 <code>SPACEPAY_KEY</code>。</li>
+        <li><b>不要</b>写进浏览器代码、移动端包体、Git 仓库、日志或错误上报。</li>
+        <li>不同环境（测试 / 生产）、不同服务使用不同的 Key，便于单独吊销。</li>
+        <li>当前 <code>sp_test_</code> 与 <code>sp_live_</code> 的行为一致，仅用于区分环境标签；接入真实支付时会区分沙箱与生产。</li>
+      </ul>
+
+      <h2 id="rotate">轮换与吊销</h2>
+      <div class="steps">
+        <div class="step"><div><b>创建新密钥</b><p>商户后台 →「API 密钥」→ 创建，复制新密钥并更新服务端配置。</p></div></div>
+        <div class="step"><div><b>验证新密钥</b><p>调用 <code>GET /api/v1/balance</code> 确认新密钥可用。</p></div></div>
+        <div class="step"><div><b>吊销旧密钥</b><p>确认没有流量后吊销旧密钥，吊销立即生效。</p></div></div>
+      </div>
+      <div class="callout warn"><span class="ico">!</span><span>怀疑密钥泄露时不要等待：立即吊销，创建新密钥，并检查商户后台的 API 请求日志与支付记录。</span></div>
+
+      <h2 id="webhook-secret">Webhook 签名密钥</h2>
+      <p>每个商户有一个 <code>webhook_secret</code>，用于计算 <code>X-SpacePay-Signature</code>。在商户后台「Webhook」页可以重置：</p>
+      <ul>
+        <li>重置后旧密钥立即失效，新密钥只显示一次。</li>
+        <li>你的服务端需要同时更新密钥；更新期间可以短暂接受旧签名完成切换。</li>
+        <li>签名校验必须使用原始请求体，并用常量时间比较。</li>
+      </ul>
+
+      <h2 id="transport">传输与网络</h2>
+      <ul>
+        <li>所有接口必须通过 HTTPS 访问；HTTP 请求会被重定向或拒绝。</li>
+        <li>Webhook 地址必须是 HTTPS，且不能指向本机、内网或链路本地地址；投递前会解析域名做二次校验。</li>
+        <li>不要在 Webhook 地址中使用会跳转到内网的短链或代理。</li>
+      </ul>
+
+      <h2 id="payments">支付安全</h2>
+      <ul>
+        <li>金额由服务端根据订单计算，不要直接使用前端传入的金额。</li>
+        <li>付款人必须登录并输入支付 PIN；PIN 连续错误会锁定。</li>
+        <li><code>customer_email</code> 可以限定付款人，适合会员或定向支付场景。</li>
+        <li>以 Webhook 或查询接口确认支付结果，不要信任浏览器跳转。</li>
+      </ul>
+
+      <h2 id="logging">日志与排查</h2>
+      <ul>
+        <li>服务端日志会记录请求编号 <code>request_id</code>，不会记录密钥、PIN、密码与签名密钥。</li>
+        <li>提交工单或在商户后台排查时，提供 <code>request_id</code> 与发生时间，不要粘贴完整密钥。</li>
+        <li>商户后台可以查看最近 100 条 API 请求日志，用于确认调用方与状态码。</li>
+      </ul>
+
+      <div class="callout danger"><span class="ico">!</span><span>本环境是虚拟资金环境。若将来接入真实资金，必须由持牌支付机构处理资金流，并完成相应的合规与安全审计。</span></div>
+    </article>
+    <nav class="prevnext" id="pageNav"></nav>
+  </main>
+</div>
+<aside class="doc-toc" id="docToc"></aside>
+<script src="/docs/docs.js" defer></script>
+</body>
+</html>

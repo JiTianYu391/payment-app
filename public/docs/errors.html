@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>错误码 · SpacePay 开发者文档</title>
+<meta name="description" content="SpacePay API 错误响应格式、全部错误码与重试建议。">
+<meta name="theme-color" content="#FFFFFF" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#141920" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="/brand/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/styles.css">
+<link rel="stylesheet" href="/docs/docs.css">
+<script>try { var t = localStorage.getItem('spacepay_theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}</script>
+</head>
+<body class="doc-body" data-page="errors">
+<header class="doc-header" id="docHeader"></header>
+<div class="doc-scrim" id="docScrim"></div>
+<div class="doc-shell">
+  <aside class="doc-side" id="docSide">
+    <div class="doc-search"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="docSearch" type="search" placeholder="搜索文档" aria-label="搜索文档"></div>
+    <nav class="doc-nav" id="docNav"></nav>
+  </aside>
+  <main class="doc-main">
+    <article class="doc-article">
+      <h1>错误码</h1>
+      <p class="lede">所有错误响应结构一致：HTTP 状态码 + 机器可读的 <code>code</code> + 可读的 <code>error</code> + <code>request_id</code>。</p>
+
+      <h2 id="format">错误响应格式</h2>
+      <div class="codeblock">
+        <div class="code-head"><div class="lang-tabs"><button class="active" data-lang="json">JSON</button></div><button class="copy">复制</button></div>
+<pre data-lang="json">{
+  "ok": false,
+  "error": "余额不足：还差 $1.00",
+  "code": "INSUFFICIENT_MERCHANT_BALANCE",
+  "request_id": "req_9f8e7d6c5b4a3210",
+  "details": { "available_cents": 900 }
+}</pre>
+      </div>
+      <p>排查问题时请提供 <code>request_id</code>：它同时出现在服务端访问日志中，可以定位到具体请求。</p>
+
+      <h2 id="auth">鉴权与权限</h2>
+      <table class="doc-table">
+        <thead><tr><th>HTTP</th><th>code</th><th>说明与处理</th></tr></thead>
+        <tbody>
+          <tr><td>401</td><td><code>INVALID_API_KEY</code></td><td>缺少密钥、格式错误、Secret 不匹配或已吊销。检查 <code>Authorization</code> 头，确认密钥未被吊销</td></tr>
+          <tr><td>401</td><td><code>UNAUTHENTICATED</code></td><td>结账接口需要付款人登录；先完成登录再重试</td></tr>
+          <tr><td>403</td><td><code>MERCHANT_INACTIVE</code></td><td>商户未通过审核或已被暂停。联系运营，或检查商户后台状态</td></tr>
+          <tr><td>403</td><td><code>CUSTOMER_MISMATCH</code></td><td>支付单指定了其他付款人</td></tr>
+          <tr><td>403</td><td><code>PIN_INCORRECT</code></td><td>付款人支付 PIN 错误</td></tr>
+          <tr><td>423</td><td><code>PIN_LOCKED</code></td><td>PIN 连续错误被锁定，等待锁定时间结束</td></tr>
+        </tbody>
+      </table>
+
+      <h2 id="request">请求与参数</h2>
+      <table class="doc-table">
+        <thead><tr><th>HTTP</th><th>code</th><th>说明与处理</th></tr></thead>
+        <tbody>
+          <tr><td>400</td><td><code>AMOUNT_REQUIRED</code></td><td>未传 <code>amount</code></td></tr>
+          <tr><td>400</td><td><code>AMOUNT_INVALID</code></td><td>金额不是合法十进制数，如 <code>"12.3.4"</code></td></tr>
+          <tr><td>400</td><td><code>AMOUNT_PRECISION</code></td><td>金额超过 2 位小数</td></tr>
+          <tr><td>400</td><td><code>AMOUNT_ZERO</code></td><td>金额必须大于 0</td></tr>
+          <tr><td>400</td><td><code>AMOUNT_NEGATIVE</code></td><td>金额为负数</td></tr>
+          <tr><td>400</td><td><code>AMOUNT_TOO_LARGE</code></td><td>金额超过上限（<code>$10,000,000.00</code>）</td></tr>
+          <tr><td>400</td><td><code>FIELD_REQUIRED</code> / <code>FIELD_INVALID</code> / <code>FIELD_TOO_LONG</code></td><td>字段缺失、格式或长度不符合要求，<code>details.field</code> 指明字段</td></tr>
+          <tr><td>400</td><td><code>METADATA_INVALID</code></td><td><code>metadata</code> 必须是对象</td></tr>
+          <tr><td>400</td><td><code>METADATA_TOO_LARGE</code></td><td><code>metadata</code> 序列化后超过 2KB</td></tr>
+          <tr><td>400</td><td><code>BAD_JSON</code></td><td>请求体不是合法 JSON</td></tr>
+          <tr><td>413</td><td><code>PAYLOAD_TOO_LARGE</code></td><td>请求体超过 100KB</td></tr>
+        </tbody>
+      </table>
+
+      <h2 id="payment">支付与退款</h2>
+      <table class="doc-table">
+        <thead><tr><th>HTTP</th><th>code</th><th>说明与处理</th></tr></thead>
+        <tbody>
+          <tr><td>404</td><td><code>PAYMENT_NOT_FOUND</code></td><td>支付单不存在或不属于当前商户</td></tr>
+          <tr><td>409</td><td><code>REFERENCE_CONFLICT</code></td><td>同一订单号已用于金额不同的支付；换一个 <code>reference</code></td></tr>
+          <tr><td>409</td><td><code>PAYMENT_NOT_PAYABLE</code></td><td>支付单已支付、已取消或状态不可支付</td></tr>
+          <tr><td>409</td><td><code>PAYMENT_EXPIRED</code></td><td>支付单超过 30 分钟有效期</td></tr>
+          <tr><td>409</td><td><code>PAYMENT_NOT_CANCELABLE</code></td><td>支付单当前状态不能取消</td></tr>
+          <tr><td>400</td><td><code>PAYMENT_NOT_REFUNDABLE</code></td><td>只有成功支付可以退款</td></tr>
+          <tr><td>400</td><td><code>REFUND_EXCEEDS_REMAINING</code></td><td>退款超过可退金额，<code>details.refundable_cents</code> 给出上限</td></tr>
+          <tr><td>400</td><td><code>INSUFFICIENT_MERCHANT_BALANCE</code></td><td>商户可结算余额不足，<code>details.available_cents</code> 给出当前值</td></tr>
+          <tr><td>409</td><td><code>CONCURRENT_MODIFICATION</code></td><td>并发修改冲突，刷新后重试</td></tr>
+        </tbody>
+      </table>
+
+      <h2 id="idempotency">幂等与限流</h2>
+      <table class="doc-table">
+        <thead><tr><th>HTTP</th><th>code</th><th>说明与处理</th></tr></thead>
+        <tbody>
+          <tr><td>400</td><td><code>IDEMPOTENCY_KEY_INVALID</code></td><td>键格式不正确：8–255 位字母、数字或 <code>- _ : .</code></td></tr>
+          <tr><td>422</td><td><code>IDEMPOTENCY_KEY_REUSED</code></td><td>同一个键用于参数不同的请求；为新操作生成新键</td></tr>
+          <tr><td>409</td><td><code>IDEMPOTENCY_IN_PROGRESS</code></td><td>相同请求正在处理中，稍后用同一个键重试</td></tr>
+          <tr><td>429</td><td><code>RATE_LIMITED</code></td><td>超过每个 Key 每分钟的请求上限；退避后重试</td></tr>
+        </tbody>
+      </table>
+
+      <h2 id="server">服务端</h2>
+      <table class="doc-table">
+        <thead><tr><th>HTTP</th><th>code</th><th>说明与处理</th></tr></thead>
+        <tbody>
+          <tr><td>500</td><td><code>INTERNAL</code></td><td>未预期的服务端错误，响应包含 <code>request_id</code>；可安全重试（写请求带同一个幂等键）</td></tr>
+          <tr><td>502/503/504</td><td>—</td><td>网关或上游不可用；按指数退避重试，写请求带同一个幂等键</td></tr>
+        </tbody>
+      </table>
+
+      <h2 id="retry">什么时候可以重试</h2>
+      <table class="doc-table">
+        <thead><tr><th>情况</th><th>建议</th></tr></thead>
+        <tbody>
+          <tr><td>4xx（除 409 <code>IDEMPOTENCY_IN_PROGRESS</code>、429）</td><td>不要重试，修正请求参数</td></tr>
+          <tr><td>409 <code>IDEMPOTENCY_IN_PROGRESS</code></td><td>等待 1–2 秒后用同一个幂等键重试</td></tr>
+          <tr><td>429</td><td>指数退避后重试</td></tr>
+          <tr><td>5xx / 网络超时</td><td>指数退避重试；写请求必须带同一个 <code>Idempotency-Key</code></td></tr>
+        </tbody>
+      </table>
+      <div class="callout tip"><span class="ico">✓</span><span>失败的资金请求不会产生资金变动（服务端在事务内回滚），可以放心用同一个幂等键重试。</span></div>
+    </article>
+    <nav class="prevnext" id="pageNav"></nav>
+  </main>
+</div>
+<aside class="doc-toc" id="docToc"></aside>
+<script src="/docs/docs.js" defer></script>
+</body>
+</html>

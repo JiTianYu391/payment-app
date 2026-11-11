@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>结算余额与提现 · SpacePay 开发者文档</title>
+<meta name="description" content="GET /api/v1/balance 与 /api/v1/payouts：商户可结算余额、申请结算提现与审核流程。">
+<meta name="theme-color" content="#FFFFFF" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#141920" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="/brand/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/styles.css">
+<link rel="stylesheet" href="/docs/docs.css">
+<script>try { var t = localStorage.getItem('spacepay_theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}</script>
+</head>
+<body class="doc-body" data-page="settlement">
+<header class="doc-header" id="docHeader"></header>
+<div class="doc-scrim" id="docScrim"></div>
+<div class="doc-shell">
+  <aside class="doc-side" id="docSide">
+    <div class="doc-search"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="docSearch" type="search" placeholder="搜索文档" aria-label="搜索文档"></div>
+    <nav class="doc-nav" id="docNav"></nav>
+  </aside>
+  <main class="doc-main">
+    <article class="doc-article">
+      <h1>结算余额与提现</h1>
+      <p class="lede">查看商户可结算余额，申请把余额提现到指定账户。提现需财务审核，审核通过后出款（本环境为模拟出款）。</p>
+
+      <h2 id="balance">查询余额</h2>
+      <div class="endpoint"><span class="method get">GET</span><span class="path">/api/v1/balance</span><span class="note">需要 API Key</span></div>
+      <div class="codeblock">
+        <div class="code-head"><div class="lang-tabs"><button class="active" data-lang="curl">curl</button><button data-lang="python">Python</button><button data-lang="node">Node.js</button></div><button class="copy">复制</button></div>
+<pre data-lang="curl">curl "https://your-domain/api/v1/balance" \
+  -H "Authorization: Bearer $SPACEPAY_KEY"</pre>
+<pre data-lang="python" hidden>import os
+import requests
+
+data = requests.get(
+    "https://your-domain/api/v1/balance",
+    headers={"Authorization": f"Bearer {os.environ['SPACEPAY_KEY']}"},
+    timeout=15,
+).json()
+print(data["balance"]["available"])</pre>
+<pre data-lang="node" hidden>const { balance } = await (await fetch('https://your-domain/api/v1/balance', {
+  headers: { Authorization: `Bearer ${process.env.SPACEPAY_KEY}` },
+})).json();
+console.log(balance.available);</pre>
+      </div>
+      <div class="codeblock">
+        <div class="code-head"><div class="lang-tabs"><button class="active" data-lang="json">JSON</button></div><button class="copy">复制</button></div>
+<pre data-lang="json">{
+  "ok": true,
+  "balance": {
+    "available_cents": 1000,
+    "available": "10.00",
+    "pending_payout_cents": 0,
+    "pending_payout": "0.00",
+    "currency": "USD"
+  }
+}</pre>
+      </div>
+      <table class="doc-table">
+        <thead><tr><th>字段</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td><code>available_cents</code></td><td>可结算余额 = 成功支付 − 已退款 − 已出款 − 审核中的提现</td></tr>
+          <tr><td><code>pending_payout_cents</code></td><td>已申请、等待审核的提现金额</td></tr>
+        </tbody>
+      </table>
+
+      <h2 id="create-payout">申请结算提现</h2>
+      <div class="endpoint"><span class="method post">POST</span><span class="path">/api/v1/payouts</span><span class="note">需要 API Key</span></div>
+      <table class="doc-table">
+        <thead><tr><th>参数</th><th>类型</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td><code>amount</code><span class="req">必填</span></td><td>string</td><td>提现金额，不能超过可结算余额</td></tr>
+          <tr><td><code>destination</code><span class="opt">可选</span></td><td>string</td><td>收款账户说明，如 <code>招商银行 尾号 1234</code></td></tr>
+        </tbody>
+      </table>
+      <div class="codeblock">
+        <div class="code-head"><div class="lang-tabs"><button class="active" data-lang="curl">curl</button><button data-lang="python">Python</button><button data-lang="node">Node.js</button></div><button class="copy">复制</button></div>
+<pre data-lang="curl">curl "https://your-domain/api/v1/payouts" \
+  -X POST \
+  -H "Authorization: Bearer $SPACEPAY_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"amount":"10.00","destination":"招商银行 尾号 1234"}'</pre>
+<pre data-lang="python" hidden>import os
+import requests
+
+resp = requests.post(
+    "https://your-domain/api/v1/payouts",
+    headers={"Authorization": f"Bearer {os.environ['SPACEPAY_KEY']}"},
+    json={"amount": "10.00", "destination": "招商银行 尾号 1234"},
+    timeout=15,
+)
+print(resp.json())</pre>
+<pre data-lang="node" hidden>const resp = await fetch('https://your-domain/api/v1/payouts', {
+  method: 'POST',
+  headers: {
+    Authorization: `Bearer ${process.env.SPACEPAY_KEY}`,
+    'Content-Type': 'application/json',
+  },
+  body: JSON.stringify({ amount: '10.00', destination: '招商银行 尾号 1234' }),
+});
+const data = await resp.json();</pre>
+      </div>
+      <div class="codeblock">
+        <div class="code-head"><div class="lang-tabs"><button class="active" data-lang="json">JSON</button></div><button class="copy">复制</button></div>
+<pre data-lang="json">{
+  "ok": true,
+  "payout": {
+    "id": "po_1",
+    "numeric_id": 1,
+    "amount_cents": 1000,
+    "amount": "10.00",
+    "status": "PENDING",
+    "destination": "招商银行 尾号 1234",
+    "created_at": 1762800300000
+  }
+}</pre>
+      </div>
+
+      <h2 id="payout-status">提现状态</h2>
+      <div class="pillrow"><span class="st warn">PENDING</span><span class="st ok">SUCCEEDED</span><span class="st bad">FAILED</span></div>
+      <table class="doc-table">
+        <thead><tr><th>状态</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td><code>PENDING</code></td><td>已提交，等待财务审核；金额已从可结算余额冻结</td></tr>
+          <tr><td><code>SUCCEEDED</code></td><td>审核通过，已出款（模拟）</td></tr>
+          <tr><td><code>FAILED</code></td><td>审核驳回，金额退回可结算余额</td></tr>
+        </tbody>
+      </table>
+      <p>申请后金额立即从 <code>available_cents</code> 转入 <code>pending_payout_cents</code>，避免重复申请；驳回时自动退回。</p>
+
+      <h2 id="list-payouts">查询提现记录</h2>
+      <div class="endpoint"><span class="method get">GET</span><span class="path">/api/v1/payouts</span><span class="note">需要 API Key</span></div>
+      <p>返回最近 50 条提现记录与当前余额。也可以在商户后台「结算」页查看并在页面内提交。</p>
+
+      <h2 id="errors">错误码</h2>
+      <table class="doc-table">
+        <thead><tr><th>code</th><th>原因</th></tr></thead>
+        <tbody>
+          <tr><td><code>INSUFFICIENT_MERCHANT_BALANCE</code></td><td>提现金额超过可结算余额</td></tr>
+          <tr><td><code>AMOUNT_REQUIRED</code></td><td>未传金额</td></tr>
+          <tr><td><code>AMOUNT_INVALID</code></td><td>金额格式错误</td></tr>
+          <tr><td><code>RATE_LIMITED</code></td><td>请求过于频繁</td></tr>
+        </tbody>
+      </table>
+      <div class="callout warn"><span class="ico">!</span><span>本环境的出款是模拟流程，不会到达真实银行账户。真实资金结算需要接入持牌支付机构。</span></div>
+    </article>
+    <nav class="prevnext" id="pageNav"></nav>
+  </main>
+</div>
+<aside class="doc-toc" id="docToc"></aside>
+<script src="/docs/docs.js" defer></script>
+</body>
+</html>

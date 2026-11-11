@@ -29,7 +29,7 @@
 - Webhook：`X-SpacePay-Signature: t=…,v1=HMAC-SHA256(secret, t + "." + rawBody)`；1 分钟 / 5 分钟 / 30 分钟 / 2 小时 / 6 小时重试，最多 6 次；后台可手动重投。地址要求 HTTPS 且禁止内网（`WEBHOOK_ALLOW_HTTP=true` 仅用于本地联调）。
 - 账务：付款人钱包 → `merchant:payable` → 申请结算转入 `clearing:merchant_payouts` → 审核出款；驳回原路退回。
 - 对账新增：商户待结算不能为负；待结算 + 在途结算 = 成功支付 − 退款 − 已出款；在途结算 = 待审核结算合计。
-- 新增页面：`/merchant` 商户后台、`/developers` 开放平台文档、`/pay` 结账页；运营后台新增商户、退款申请、商户结算三个页面。
+- 新增页面：`/merchant` 商户后台、`/docs` 开放平台文档站、`/pay` 结账页；运营后台新增商户、退款申请、商户结算三个页面。
 
 ### 运维与文案
 

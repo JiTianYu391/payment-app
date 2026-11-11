@@ -353,6 +353,22 @@ module.exports = function scenario(env) {
     assert.match(await sw.text(), /\/api\//); // 接口请求不进缓存
   });
 
+  test('开发者文档站：页面与静态资源可访问，旧入口重定向', async () => {
+    const pages = ['', '/payments', '/payment-query', '/refunds', '/settlement', '/webhooks', '/checkout', '/errors', '/limits', '/security', '/changelog'];
+    for (const p of pages) {
+      const r = await fetch(t.base + '/docs' + p);
+      assert.equal(r.status, 200, '/docs' + p);
+      assert.match(await r.text(), /SpacePay 开发者文档/, '/docs' + p);
+    }
+    for (const asset of ['/docs/docs.css', '/docs/docs.js']) assert.equal((await fetch(t.base + asset)).status, 200, asset);
+    const old = await fetch(t.base + '/developers', { redirect: 'manual' });
+    assert.equal(old.status, 301);
+    assert.equal(old.headers.get('location'), '/docs');
+    const missing = await fetch(t.base + '/docs/nope', { redirect: 'manual' });
+    assert.equal(missing.status, 302);
+    assert.equal(missing.headers.get('location'), '/docs');
+  });
+
   test('健康检查与未知接口', async () => {
     const h = await t.call('GET', '/api/health');
     assert.equal(h.body.service, 'SpacePay');

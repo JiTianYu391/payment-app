@@ -4,7 +4,7 @@
 
 SpacePay 是一个支付与资金管理系统：钱包、转账、商户付款、退款、提现审核、投资收益模拟，以及面向运营、财务和商户的后台。**账户余额为虚拟资金**，提现为模拟出款，不连接真实银行、支付渠道或交易市场。
 
-- 开放平台文档：[/developers](/developers)（商户接入、Webhook 签名、错误码）
+- 开放平台文档：[/docs](/docs)（快速开始、接口参考、Webhook、错误码）
 - 商户后台：[/merchant](/merchant)
 - 改造说明：[`docs/CHANGES.md`](docs/CHANGES.md) · 调研摘要：[`docs/research.md`](docs/research.md) · 标识与配色：[`docs/brand.md`](docs/brand.md)
 - 部署：[`README-fadehost.md`](README-fadehost.md)、[`README-pandastack.md`](README-pandastack.md)
@@ -76,7 +76,7 @@ npm test                          # 单元 + 集成测试（Node 内置 node:tes
 | `GET/POST /api/v1/payouts` | 结算提现 |
 | `POST /api/checkout/:token/pay` | 付款人结账（登录 + 支付 PIN） |
 
-鉴权：`Authorization: Bearer sp_live_<key_id>_<secret>`，每个 Key 每分钟限流。Webhook 使用 `X-SpacePay-Signature: t=…,v1=HMAC-SHA256(secret, t + "." + rawBody)`，失败按 1 分钟 / 5 分钟 / 30 分钟 / 2 小时 / 6 小时重试，共 6 次。完整说明见 [/developers](/developers)。
+鉴权：`Authorization: Bearer sp_live_<key_id>_<secret>`，每个 Key 每分钟限流。Webhook 使用 `X-SpacePay-Signature: t=…,v1=HMAC-SHA256(secret, t + "." + rawBody)`，失败按 1 分钟 / 5 分钟 / 30 分钟 / 2 小时 / 6 小时重试，共 6 次。完整说明见 [/docs](/docs)。
 
 ## 运维
 
@@ -110,6 +110,6 @@ src/logger.js          结构化日志；src/errors.js 统一错误；src/valida
 src/resilience.js      超时 / 重试 / 降级
 src/db.js              SQLite / JSON 双后端、表结构与迁移
 public/                主应用（index.html、app.js、styles.css）、商户后台（merchant.html / merchant.js）、
-                       开发者文档（developers.html）、结账页（pay.html）、PWA 与品牌资源
+                      开发者文档站（docs/）、结账页（pay.html）、PWA 与品牌资源
 test/                  unit/ 单元测试，integration/ 集成测试（SQLite 与 JSON 各跑一遍）
 ```

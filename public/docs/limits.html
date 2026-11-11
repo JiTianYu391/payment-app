@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>限流与幂等 · SpacePay 开发者文档</title>
+<meta name="description" content="SpacePay API 的请求限流、Idempotency-Key 幂等语义与重试示例。">
+<meta name="theme-color" content="#FFFFFF" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#141920" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="/brand/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/styles.css">
+<link rel="stylesheet" href="/docs/docs.css">
+<script>try { var t = localStorage.getItem('spacepay_theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}</script>
+</head>
+<body class="doc-body" data-page="limits">
+<header class="doc-header" id="docHeader"></header>
+<div class="doc-scrim" id="docScrim"></div>
+<div class="doc-shell">
+  <aside class="doc-side" id="docSide">
+    <div class="doc-search"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="docSearch" type="search" placeholder="搜索文档" aria-label="搜索文档"></div>
+    <nav class="doc-nav" id="docNav"></nav>
+  </aside>
+  <main class="doc-main">
+    <article class="doc-article">
+      <h1>限流与幂等</h1>
+      <p class="lede">限流保护服务稳定，幂等保证重试安全。资金类请求请始终携带 <code>Idempotency-Key</code>。</p>
+
+      <h2 id="rate">请求限流</h2>
+      <table class="doc-table">
+        <thead><tr><th>项目</th><th>值</th></tr></thead>
+        <tbody>
+          <tr><td>限额</td><td>每个 API Key 每分钟 120 次请求（可由部署方用 <code>MERCHANT_RATE_LIMIT</code> 调整）</td></tr>
+          <tr><td>超出时</td><td>HTTP <code>429</code>，<code>code</code> 为 <code>RATE_LIMITED</code></td></tr>
+          <tr><td>计数范围</td><td>按 Key 统计，与该 Key 下的接口、参数无关</td></tr>
+        </tbody>
+      </table>
+      <p>建议为不同环境（测试 / 生产）创建不同的 Key，避免互相占用额度。</p>
+
+      <h2 id="idempotency">Idempotency-Key</h2>
+      <p>资金类 <code>POST</code> 接口支持 <code>Idempotency-Key</code> 请求头。服务端会保存首次成功响应 24 小时：</p>
+      <table class="doc-table">
+        <thead><tr><th>场景</th><th>行为</th></tr></thead>
+        <tbody>
+          <tr><td>同键、同参数、首次成功</td><td>正常执行并记录响应</td></tr>
+          <tr><td>同键、同参数、24 小时内重试</td><td>直接重放原响应，并返回响应头 <code>Idempotent-Replayed: true</code></td></tr>
+          <tr><td>同键、不同参数</td><td>HTTP <code>422</code>，<code>IDEMPOTENCY_KEY_REUSED</code></td></tr>
+          <tr><td>同键、首次请求仍在处理中</td><td>HTTP <code>409</code>，<code>IDEMPOTENCY_IN_PROGRESS</code></td></tr>
+          <tr><td>首次请求失败（非 2xx）</td><td>不保存，可用同一个键安全重试</td></tr>
+        </tbody>
+      </table>
+      <p>键的格式：8–255 位字母、数字或 <code>- _ : .</code>，推荐 UUID v4。校验时不会把 PIN、密码等敏感字段计入参数摘要。</p>
+
+      <h2 id="reference">reference 去重</h2>
+      <p><code>POST /api/v1/payments</code> 的 <code>reference</code> 是业务订单号：同一商户内，相同 <code>reference</code> 且金额一致时返回同一笔支付；金额不同返回 <code>409 REFERENCE_CONFLICT</code>。适合作为支付创建的业务幂等键。</p>
+
+      <h2 id="retry">重试示例</h2>
+      <p>超时或 5xx 时，用同一个 <code>Idempotency-Key</code> 重试；4xx 不要重试。</p>
+      <div class="codeblock">
+        <div class="code-head"><div class="lang-tabs"><button class="active" data-lang="python">Python</button><button data-lang="node">Node.js</button></div><button class="copy">复制</button></div>
+<pre data-lang="python">import os
+import time
+import uuid
+import requests
+
+key = str(uuid.uuid4())
+payload = {"amount": "12.34", "reference": "order-2026-0001"}
+headers = {
+    "Authorization": f"Bearer {os.environ['SPACEPAY_KEY']}",
+    "Idempotency-Key": key,
+}
+
+for attempt in range(5):
+    try:
+        resp = requests.post(
+            "https://your-domain/api/v1/payments",
+            headers=headers, json=payload, timeout=15,
+        )
+    except requests.Timeout:
+        time.sleep(2 ** attempt)
+        continue
+
+    if resp.status_code < 500 and resp.status_code != 429:
+        resp.raise_for_status()
+        break
+    time.sleep(2 ** attempt)
+else:
+    raise RuntimeError("重试次数用尽")</pre>
+<pre data-lang="node" hidden>import { randomUUID } from 'node:crypto';
+
+const idempotencyKey = randomUUID();
+const payload = { amount: '12.34', reference: 'order-2026-0001' };
+
+let data;
+for (let attempt = 0; attempt < 5; attempt++) {
+  try {
+    const resp = await fetch('https://your-domain/api/v1/payments', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${process.env.SPACEPAY_KEY}`,
+        'Content-Type': 'application/json',
+        'Idempotency-Key': idempotencyKey,
+      },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(15000),
+    });
+    if (resp.status < 500 && resp.status !== 429) {
+      data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || data.code);
+      break;
+    }
+  } catch (e) {
+    if (attempt === 4) throw e;
+  }
+  await new Promise((r) => setTimeout(r, 2 ** attempt * 1000));
+}</pre>
+      </div>
+
+      <h2 id="ttl">有效期一览</h2>
+      <table class="doc-table">
+        <thead><tr><th>对象</th><th>有效期</th></tr></thead>
+        <tbody>
+          <tr><td>支付单（<code>checkout_url</code>）</td><td>30 分钟，过期后不能再支付</td></tr>
+          <tr><td>Idempotency-Key 记录</td><td>24 小时</td></tr>
+          <tr><td>Webhook 重试</td><td>最多 6 次，跨度约 8 小时</td></tr>
+          <tr><td>商户后台 API 请求日志</td><td>最近 5 万条</td></tr>
+        </tbody>
+      </table>
+      <div class="callout info"><span class="ico">i</span><span>幂等键记录保存在数据库中，多实例共享；限流计数器按部署实例维护，多实例部署时建议在网关层统一限流。</span></div>
+    </article>
+    <nav class="prevnext" id="pageNav"></nav>
+  </main>
+</div>
+<aside class="doc-toc" id="docToc"></aside>
+<script src="/docs/docs.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>退款 · SpacePay 开发者文档</title>
+<meta name="description" content="POST /api/v1/payments/:id/refund：部分或全额退款、可退余额与商户结算余额约束。">
+<meta name="theme-color" content="#FFFFFF" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#141920" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="/brand/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/styles.css">
+<link rel="stylesheet" href="/docs/docs.css">
+<script>try { var t = localStorage.getItem('spacepay_theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}</script>
+</head>
+<body class="doc-body" data-page="refunds">
+<header class="doc-header" id="docHeader"></header>
+<div class="doc-scrim" id="docScrim"></div>
+<div class="doc-shell">
+  <aside class="doc-side" id="docSide">
+    <div class="doc-search"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="docSearch" type="search" placeholder="搜索文档" aria-label="搜索文档"></div>
+    <nav class="doc-nav" id="docNav"></nav>
+  </aside>
+  <main class="doc-main">
+    <article class="doc-article">
+      <h1>退款</h1>
+      <p class="lede">对已成功的支付发起部分或全额退款。资金从商户待结算余额退回付款人钱包，可多次退款，累计不超过原支付金额。</p>
+
+      <div class="endpoint"><span class="method post">POST</span><span class="path">/api/v1/payments/:id/refund</span><span class="note">需要 API Key</span></div>
+
+      <h2 id="params">请求参数</h2>
+      <table class="doc-table">
+        <thead><tr><th>参数</th><th>类型</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td><code>amount</code><span class="opt">可选</span></td><td>string</td><td>退款金额，默认退剩余全部。不能超过 <code>refundable_cents</code></td></tr>
+          <tr><td><code>reason</code><span class="opt">可选</span></td><td>string</td><td>退款原因，付款人可见，建议填写</td></tr>
+        </tbody>
+      </table>
+
+      <h2 id="request">请求示例</h2>
+      <div class="codeblock">
+        <div class="code-head"><div class="lang-tabs"><button class="active" data-lang="curl">curl</button><button data-lang="python">Python</button><button data-lang="node">Node.js</button></div><button class="copy">复制</button></div>
+<pre data-lang="curl">curl "https://your-domain/api/v1/payments/pay_1/refund" \
+  -X POST \
+  -H "Authorization: Bearer $SPACEPAY_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"amount":"2.34","reason":"部分退单"}'</pre>
+<pre data-lang="python" hidden>import os
+import requests
+
+resp = requests.post(
+    "https://your-domain/api/v1/payments/pay_1/refund",
+    headers={"Authorization": f"Bearer {os.environ['SPACEPAY_KEY']}"},
+    json={"amount": "2.34", "reason": "部分退单"},
+    timeout=15,
+)
+print(resp.json())</pre>
+<pre data-lang="node" hidden>const resp = await fetch('https://your-domain/api/v1/payments/pay_1/refund', {
+  method: 'POST',
+  headers: {
+    Authorization: `Bearer ${process.env.SPACEPAY_KEY}`,
+    'Content-Type': 'application/json',
+  },
+  body: JSON.stringify({ amount: '2.34', reason: '部分退单' }),
+});
+const data = await resp.json();</pre>
+      </div>
+
+      <h2 id="response">响应示例</h2>
+      <div class="codeblock">
+        <div class="code-head"><div class="lang-tabs"><button class="active" data-lang="json">JSON</button></div><button class="copy">复制</button></div>
+<pre data-lang="json">{
+  "ok": true,
+  "refund": {
+    "id": "ref_1",
+    "payment_id": 1,
+    "amount_cents": 234,
+    "amount": "2.34",
+    "reason": "部分退单",
+    "status": "SUCCEEDED",
+    "created_at": 1762800200000
+  },
+  "payment": {
+    "id": "pay_1",
+    "status": "PARTIALLY_REFUNDED",
+    "refunded_cents": 234,
+    "refundable_cents": 1000
+  }
+}</pre>
+      </div>
+
+      <h2 id="rules">退款规则</h2>
+      <ul>
+        <li>只有 <code>SUCCEEDED</code> 或 <code>PARTIALLY_REFUNDED</code> 的支付可以退款；未支付、已过期、已取消的支付返回 <code>PAYMENT_NOT_REFUNDABLE</code>。</li>
+        <li>累计退款不能超过原支付金额；超额返回 <code>REFUND_EXCEEDS_REMAINING</code>，并在 <code>details.refundable_cents</code> 中给出可退金额。</li>
+        <li>退款从商户<b>可结算余额</b>扣除。若已发起结算提现导致余额不足，返回 <code>INSUFFICIENT_MERCHANT_BALANCE</code>。</li>
+        <li>退款成功后付款人钱包立即入账，支付状态变为 <code>PARTIALLY_REFUNDED</code> 或 <code>REFUNDED</code>。</li>
+      </ul>
+
+      <h2 id="webhook">退款事件</h2>
+      <p>每次退款成功都会推送 <code>payment.refunded</code>，<code>data</code> 是最新的支付单快照（含 <code>refunded_cents</code> 与 <code>status</code>）。请以事件驱动退款状态，而不是轮询。</p>
+
+      <h2 id="errors">常见错误</h2>
+      <table class="doc-table">
+        <thead><tr><th>code</th><th>原因</th></tr></thead>
+        <tbody>
+          <tr><td><code>PAYMENT_NOT_FOUND</code></td><td>支付单不存在或不属于当前商户</td></tr>
+          <tr><td><code>PAYMENT_NOT_REFUNDABLE</code></td><td>支付尚未成功或已进入不可退款状态</td></tr>
+          <tr><td><code>REFUND_EXCEEDS_REMAINING</code></td><td>退款金额超过剩余可退金额</td></tr>
+          <tr><td><code>INSUFFICIENT_MERCHANT_BALANCE</code></td><td>商户可结算余额不足</td></tr>
+          <tr><td><code>AMOUNT_INVALID</code></td><td>金额格式错误或小于等于 0</td></tr>
+        </tbody>
+      </table>
+      <div class="callout tip"><span class="ico">✓</span><span>退款同样建议带 <code>Idempotency-Key</code>：网络超时后用同一个键重试，不会重复退款。</span></div>
+    </article>
+    <nav class="prevnext" id="pageNav"></nav>
+  </main>
+</div>
+<aside class="doc-toc" id="docToc"></aside>
+<script src="/docs/docs.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>首次调用 API · SpacePay 开发者文档</title>
+<meta name="description" content="SpacePay 商户 API 快速开始：创建 API Key、发起第一笔支付、接收 Webhook。">
+<meta name="theme-color" content="#FFFFFF" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#141920" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="/brand/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/styles.css">
+<link rel="stylesheet" href="/docs/docs.css">
+<script>try { var t = localStorage.getItem('spacepay_theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}</script>
+</head>
+<body class="doc-body" data-page="index">
+<header class="doc-header" id="docHeader"></header>
+<div class="doc-scrim" id="docScrim"></div>
+<div class="doc-shell">
+  <aside class="doc-side" id="docSide">
+    <div class="doc-search"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="docSearch" type="search" placeholder="搜索文档" aria-label="搜索文档"></div>
+    <nav class="doc-nav" id="docNav"></nav>
+  </aside>
+  <main class="doc-main">
+    <article class="doc-article">
+      <h1>首次调用 API</h1>
+      <p class="lede">SpacePay 商户 API 用来创建支付、查询订单、发起退款和管理结算。接口使用 HTTPS + JSON，金额以整数分存储，同时返回小数金额。</p>
+
+      <div class="callout warn"><span class="ico">!</span><span>本环境的余额为<b>虚拟资金</b>，不接入真实银行卡或支付渠道，结算出款为模拟流程。接口语义、签名与幂等行为与生产实现一致，可用于完整联调。</span></div>
+
+      <h2 id="flow">接入流程</h2>
+      <div class="steps">
+        <div class="step"><div><b>入驻商户</b><p>登录 SpacePay，在「我的 → 商户后台」提交入驻申请，等待运营审核。</p></div></div>
+        <div class="step"><div><b>创建 API Key</b><p>审核通过后，在商户后台「API 密钥」创建 <code>sp_live_…</code>。密钥只显示一次，服务端只保存哈希。</p></div></div>
+        <div class="step"><div><b>创建支付</b><p>调用 <code>POST /api/v1/payments</code>，把返回的 <code>checkout_url</code> 交给付款人。</p></div></div>
+        <div class="step"><div><b>处理 Webhook</b><p>付款完成后收到 <code>payment.succeeded</code>，校验签名并更新订单状态。</p></div></div>
+      </div>
+
+      <h2 id="endpoint">接口地址与鉴权</h2>
+      <table class="doc-table">
+        <thead><tr><th>项目</th><th>值</th></tr></thead>
+        <tbody>
+          <tr><td>接口地址</td><td><code>https://your-domain/api/v1</code><br><span class="muted">当前部署：<code data-origin></code></span></td></tr>
+          <tr><td>鉴权方式</td><td><code>Authorization: Bearer sp_live_&lt;key_id&gt;_&lt;secret&gt;</code>，或请求头 <code>X-API-Key</code></td></tr>
+          <tr><td>数据格式</td><td><code>Content-Type: application/json</code>，UTF-8</td></tr>
+          <tr><td>金额</td><td>入参 <code>amount</code> 为十进制字符串（如 <code>"12.34"</code>）；响应同时返回 <code>amount_cents</code>（整数分）</td></tr>
+          <tr><td>时间</td><td>毫秒时间戳（UNIX epoch, ms）</td></tr>
+          <tr><td>币种</td><td>当前仅支持 <code>USD</code></td></tr>
+        </tbody>
+      </table>
+      <div class="callout info"><span class="ico">i</span><span>密钥是服务端凭据，务必放在服务端环境变量中，不要写进浏览器、移动端包体或 Git 仓库。怀疑泄露时在商户后台立即吊销。</span></div>
+
+      <h2 id="first-call">发起第一笔支付</h2>
+      <p>把 <code>SPACEPAY_KEY</code> 设置为你的密钥，然后发送请求：</p>
+
+      <div class="codeblock">
+        <div class="code-head">
+          <div class="lang-tabs"><button class="active" data-lang="curl">curl</button><button data-lang="python">Python</button><button data-lang="node">Node.js</button></div>
+          <button class="copy">复制</button>
+        </div>
+<pre data-lang="curl">export SPACEPAY_KEY="sp_live_xxxxxxxxxxxxxxxx_yyyyyyyyyyyyyyyyyyyyyyyy"
+
+curl "https://your-domain/api/v1/payments" \
+  -X POST \
+  -H "Authorization: Bearer $SPACEPAY_KEY" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: $(uuidgen)" \
+  -d '{
+    "amount": "12.34",
+    "reference": "order-2026-0001",
+    "description": "拿铁两杯",
+    "customer_email": "buyer@example.com",
+    "metadata": { "sku": "latte" },
+    "success_url": "https://shop.example/paid"
+  }'</pre>
+<pre data-lang="python" hidden># pip install requests
+import os
+import uuid
+import requests
+
+resp = requests.post(
+    "https://your-domain/api/v1/payments",
+    headers={
+        "Authorization": f"Bearer {os.environ['SPACEPAY_KEY']}",
+        "Idempotency-Key": str(uuid.uuid4()),
+    },
+    json={
+        "amount": "12.34",
+        "reference": "order-2026-0001",
+        "description": "拿铁两杯",
+        "customer_email": "buyer@example.com",
+        "metadata": {"sku": "latte"},
+        "success_url": "https://shop.example/paid",
+    },
+    timeout=15,
+)
+resp.raise_for_status()
+payment = resp.json()["payment"]
+print(payment["checkout_url"])</pre>
+<pre data-lang="node" hidden>// Node.js 18+（内置 fetch）
+import { randomUUID } from 'node:crypto';
+
+const resp = await fetch('https://your-domain/api/v1/payments', {
+  method: 'POST',
+  headers: {
+    Authorization: `Bearer ${process.env.SPACEPAY_KEY}`,
+    'Content-Type': 'application/json',
+    'Idempotency-Key': randomUUID(),
+  },
+  body: JSON.stringify({
+    amount: '12.34',
+    reference: 'order-2026-0001',
+    description: '拿铁两杯',
+    customer_email: 'buyer@example.com',
+    metadata: { sku: 'latte' },
+    success_url: 'https://shop.example/paid',
+  }),
+});
+
+const { payment } = await resp.json();
+console.log(payment.id, payment.checkout_url);</pre>
+      </div>
+
+      <p>返回示例：</p>
+      <div class="codeblock">
+        <div class="code-head"><div class="lang-tabs"><button class="active" data-lang="json">JSON</button></div><button class="copy">复制</button></div>
+<pre data-lang="json">{
+  "ok": true,
+  "payment": {
+    "id": "pay_1",
+    "numeric_id": 1,
+    "reference": "order-2026-0001",
+    "amount_cents": 1234,
+    "amount": "12.34",
+    "currency": "USD",
+    "status": "CREATED",
+    "refunded_cents": 0,
+    "refundable_cents": 1234,
+    "description": "拿铁两杯",
+    "customer_email": "buyer@example.com",
+    "metadata": { "sku": "latte" },
+    "checkout_url": "https://your-domain/pay.html?token=…",
+    "created_at": 1762800000000,
+    "expires_at": 1762801800000
+  }
+}</pre>
+      </div>
+
+      <h2 id="pay">让付款人完成支付</h2>
+      <p>把 <code>checkout_url</code> 交给付款人的浏览器。付款人登录 SpacePay、输入 6 位支付 PIN 后完成付款；支付单在 30 分钟内有效。</p>
+      <p>不要只依赖付款人跳回 <code>success_url</code> 判断支付成功——跳转可能被中断。以 Webhook 为准，必要时再调用 <a href="/docs/payment-query">查询支付</a> 确认。</p>
+
+      <h2 id="webhook">验证 Webhook</h2>
+      <p>付款成功后，SpacePay 会向商户后台配置的 HTTPS 地址推送 <code>payment.succeeded</code>。请求头 <code>X-SpacePay-Signature</code> 形如 <code>t=时间戳,v1=签名</code>，签名是 <code>HMAC-SHA256(webhook_secret, 时间戳 + "." + 原始请求体)</code>。</p>
+      <div class="codeblock">
+        <div class="code-head"><div class="lang-tabs"><button class="active" data-lang="node">Node.js</button><button data-lang="python">Python</button></div><button class="copy">复制</button></div>
+<pre data-lang="node">import crypto from 'node:crypto';
+
+function verify(rawBody, signatureHeader, secret) {
+  const parts = Object.fromEntries(signatureHeader.split(',').map((p) => p.split('=')));
+  const expected = crypto.createHmac('sha256', secret)
+    .update(`${parts.t}.${rawBody}`)
+    .digest('hex');
+  return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(parts.v1));
+}</pre>
+<pre data-lang="python" hidden>import hashlib
+import hmac
+
+def verify(raw_body: bytes, signature_header: str, secret: str) -> bool:
+    parts = dict(p.split("=", 1) for p in signature_header.split(","))
+    expected = hmac.new(
+        secret.encode(), f"{parts['t']}.".encode() + raw_body, hashlib.sha256
+    ).hexdigest()
+    return hmac.compare_digest(expected, parts["v1"])</pre>
+      </div>
+      <p>完整的事件与重试规则见 <a href="/docs/webhooks">Webhook 与签名</a>。</p>
+
+      <h2 id="next">下一步</h2>
+      <ul>
+        <li><a href="/docs/payments">创建支付</a>：完整的参数与状态说明</li>
+        <li><a href="/docs/payment-query">查询支付与列表</a>：对账与订单查询</li>
+        <li><a href="/docs/refunds">退款</a>：部分或全额退款</li>
+        <li><a href="/docs/errors">错误码</a>：排查请求失败</li>
+        <li><a href="/docs/limits">限流与幂等</a>：重试与去重</li>
+      </ul>
+    </article>
+    <nav class="prevnext" id="pageNav"></nav>
+  </main>
+</div>
+<aside class="doc-toc" id="docToc"></aside>
+<script src="/docs/docs.js" defer></script>
+</body>
+</html>

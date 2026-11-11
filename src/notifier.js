@@ -48,12 +48,18 @@ function getTransporter() {
   return transporter;
 }
 
-// 启动时自检（不阻塞启动）：配置错误会在日志里立刻暴露，而不是等到第一个用户注册失败
+// 启动时自检（不阻塞启动）：配置错误会在日志里立刻暴露，而不是等到第一个用户注册失败。
+// 容器刚启动时网络可能还没就绪，失败后按 2s / 4s 重试两次。
 function verifyMail() {
-  if (mailMode() !== 'smtp') return Promise.resolve({ ok: mailMode() !== 'none', mode: mailMode() });
-  return getTransporter().verify()
+  const mode = mailMode();
+  if (mode !== 'smtp') return Promise.resolve({ ok: mode !== 'none', mode });
+  const attempt = (left) => getTransporter().verify()
     .then(() => ({ ok: true, mode: 'smtp', host: SMTP.host }))
-    .catch((e) => ({ ok: false, mode: 'smtp', host: SMTP.host, error: e.code || e.message }));
+    .catch((e) => {
+      if (left <= 1) return { ok: false, mode: 'smtp', host: SMTP.host, error: e.code || e.message };
+      return new Promise((r) => setTimeout(r, left === 3 ? 2000 : 4000)).then(() => attempt(left - 1));
+    });
+  return attempt(3);
 }
 
 const PURPOSE_TEXT = {

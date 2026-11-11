@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Webhook 与签名 · SpacePay 开发者文档</title>
+<meta name="description" content="SpacePay Webhook 事件、请求头、HMAC 签名校验、重试规则与最佳实践。">
+<meta name="theme-color" content="#FFFFFF" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#141920" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="/brand/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/styles.css">
+<link rel="stylesheet" href="/docs/docs.css">
+<script>try { var t = localStorage.getItem('spacepay_theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}</script>
+</head>
+<body class="doc-body" data-page="webhooks">
+<header class="doc-header" id="docHeader"></header>
+<div class="doc-scrim" id="docScrim"></div>
+<div class="doc-shell">
+  <aside class="doc-side" id="docSide">
+    <div class="doc-search"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="docSearch" type="search" placeholder="搜索文档" aria-label="搜索文档"></div>
+    <nav class="doc-nav" id="docNav"></nav>
+  </aside>
+  <main class="doc-main">
+    <article class="doc-article">
+      <h1>Webhook 与签名</h1>
+      <p class="lede">支付与退款事件会以 HTTPS POST 推送到商户后台配置的回调地址。每个请求都带 HMAC-SHA256 签名，失败会自动重试，也可在后台手动重投。</p>
+
+      <h2 id="setup">配置回调地址</h2>
+      <ol>
+        <li>打开<a href="/merchant">商户后台</a> →「Webhook」。</li>
+        <li>填写 HTTPS 地址，例如 <code>https://shop.example/webhooks/spacepay</code>。不能指向本机或内网地址。</li>
+        <li>保存后，同一页面可以查看签名密钥（可重置）与最近 100 条投递记录。</li>
+      </ol>
+      <div class="callout info"><span class="ico">i</span><span>你的服务端应在 10 秒内返回 2xx。返回非 2xx、超时或连接失败都会触发重试。</span></div>
+
+      <h2 id="events">事件类型</h2>
+      <table class="doc-table">
+        <thead><tr><th>事件</th><th>触发时机</th></tr></thead>
+        <tbody>
+          <tr><td><code>payment.succeeded</code></td><td>付款人完成支付，资金进入商户待结算余额</td></tr>
+          <tr><td><code>payment.refunded</code></td><td>商户或运营发起退款后</td></tr>
+        </tbody>
+      </table>
+
+      <h2 id="envelope">事件结构</h2>
+      <div class="codeblock">
+        <div class="code-head"><div class="lang-tabs"><button class="active" data-lang="json">JSON</button></div><button class="copy">复制</button></div>
+<pre data-lang="json">{
+  "id": "evt_9f8e7d6c5b4a3210",
+  "type": "payment.succeeded",
+  "created": 1762800000,
+  "data": {
+    "id": "pay_1",
+    "numeric_id": 1,
+    "reference": "order-2026-0001",
+    "amount_cents": 1234,
+    "amount": "12.34",
+    "currency": "USD",
+    "status": "SUCCEEDED",
+    "refunded_cents": 0,
+    "refundable_cents": 1234,
+    "description": "拿铁两杯",
+    "customer_email": "buyer@example.com",
+    "metadata": { "sku": "latte" },
+    "created_at": 1762800000000,
+    "paid_at": 1762800030000
+  }
+}</pre>
+      </div>
+      <p><code>data</code> 是事件发生时的支付单快照。退款事件的 <code>status</code> 为 <code>PARTIALLY_REFUNDED</code> 或 <code>REFUNDED</code>，<code>refunded_cents</code> 为累计退款金额。</p>
+
+      <h2 id="headers">请求头</h2>
+      <table class="doc-table">
+        <thead><tr><th>请求头</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td><code>Content-Type</code></td><td><code>application/json</code></td></tr>
+          <tr><td><code>X-SpacePay-Event</code></td><td>事件类型，如 <code>payment.succeeded</code></td></tr>
+          <tr><td><code>X-SpacePay-Delivery</code></td><td>事件 ID，重试时保持不变，用于去重</td></tr>
+          <tr><td><code>X-SpacePay-Signature</code></td><td><code>t=时间戳,v1=签名</code></td></tr>
+          <tr><td><code>User-Agent</code></td><td><code>SpacePay-Webhooks/1.0</code></td></tr>
+        </tbody>
+      </table>
+
+      <h2 id="signature">校验签名</h2>
+      <p>签名 = <code>HMAC-SHA256(webhook_secret, 时间戳 + "." + 原始请求体)</code>，十六进制小写。必须使用<b>原始字节</b>计算，不能先解析 JSON 再重新序列化。</p>
+      <div class="codeblock">
+        <div class="code-head"><div class="lang-tabs"><button class="active" data-lang="node">Node.js</button><button data-lang="python">Python</button><button data-lang="curl">排查</button></div><button class="copy">复制</button></div>
+<pre data-lang="node">import crypto from 'node:crypto';
+
+// rawBody 必须是未经解析的请求体字符串 / Buffer
+function verifyEvent(rawBody, signatureHeader, secret) {
+  const parts = Object.fromEntries(
+    signatureHeader.split(',').map((p) => p.split('=')),
+  );
+  const expected = crypto.createHmac('sha256', secret)
+    .update(`${parts.t}.${rawBody}`)
+    .digest('hex');
+  const a = Buffer.from(expected);
+  const b = Buffer.from(parts.v1 || '');
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}</pre>
+<pre data-lang="python" hidden>import hashlib
+import hmac
+
+def verify_event(raw_body: bytes, signature_header: str, secret: str) -> bool:
+    parts = dict(p.split("=", 1) for p in signature_header.split(","))
+    expected = hmac.new(
+        secret.encode(), f"{parts['t']}.".encode() + raw_body, hashlib.sha256
+    ).hexdigest()
+    return hmac.compare_digest(expected, parts["v1"])</pre>
+<pre data-lang="curl" hidden># 在商户后台「Webhook」页重置签名密钥后，会显示一次新的 secret。
+# 本地复算签名（把 $SECRET / $TS / $BODY 换成实际值）：
+printf '%s.%s' "$TS" "$BODY" | openssl dgst -sha256 -hmac "$SECRET"</pre>
+      </div>
+      <div class="callout tip"><span class="ico">✓</span><span>建议同时校验时间戳：与当前时间相差超过 5 分钟的事件视为过期，丢弃并记录日志，降低重放风险。</span></div>
+
+      <h2 id="retry">重试与去重</h2>
+      <ul>
+        <li>首次投递失败后，按 <b>1 分钟、5 分钟、30 分钟、2 小时、6 小时</b> 重试，共 6 次。</li>
+        <li>同一事件的 <code>X-SpacePay-Delivery</code> 在所有重试中保持不变，请用它做幂等去重。</li>
+        <li>最终失败后，投递记录保留在商户后台，可手动「重投」。</li>
+        <li>请始终以事件处理结果为准；Webhook 可能乱序，处理时比较事件时间或支付状态。</li>
+      </ul>
+
+      <h2 id="best-practice">最佳实践</h2>
+      <ol>
+        <li><b>先验签、后解析</b>，并且只接受 2xx 确认。</li>
+        <li><b>快速返回</b>：先把事件写入队列或数据库，再异步处理业务，避免 10 秒超时。</li>
+        <li><b>按事件 ID 去重</b>，处理过的 ID 保留至少 24 小时。</li>
+        <li><b>不要只依赖 Webhook</b>：定期用<a href="/docs/payment-query">查询接口</a>补偿丢失的事件。</li>
+        <li><b>密钥轮换</b>：在商户后台重置签名密钥后，服务端需立即更新；重置会使旧密钥失效。</li>
+      </ol>
+
+      <div class="callout warn"><span class="ico">!</span><span>Webhook 地址由商户配置，SpacePay 会在投递前解析域名并拒绝内网地址，避免被当作访问内网的跳板。</span></div>
+    </article>
+    <nav class="prevnext" id="pageNav"></nav>
+  </main>
+</div>
+<aside class="doc-toc" id="docToc"></aside>
+<script src="/docs/docs.js" defer></script>
+</body>
+</html>

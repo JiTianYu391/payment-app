@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>创建支付 · SpacePay 开发者文档</title>
+<meta name="description" content="POST /api/v1/payments：参数、响应字段、状态与幂等说明。">
+<meta name="theme-color" content="#FFFFFF" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#141920" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="/brand/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/styles.css">
+<link rel="stylesheet" href="/docs/docs.css">
+<script>try { var t = localStorage.getItem('spacepay_theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}</script>
+</head>
+<body class="doc-body" data-page="payments">
+<header class="doc-header" id="docHeader"></header>
+<div class="doc-scrim" id="docScrim"></div>
+<div class="doc-shell">
+  <aside class="doc-side" id="docSide">
+    <div class="doc-search"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="docSearch" type="search" placeholder="搜索文档" aria-label="搜索文档"></div>
+    <nav class="doc-nav" id="docNav"></nav>
+  </aside>
+  <main class="doc-main">
+    <article class="doc-article">
+      <h1>创建支付</h1>
+      <p class="lede">创建一笔支付单并拿到结账链接。支付单在 30 分钟内有效；付款人完成支付后，你会收到 <code>payment.succeeded</code> Webhook。</p>
+
+      <div class="endpoint"><span class="method post">POST</span><span class="path">/api/v1/payments</span><span class="note">需要 API Key</span></div>
+
+      <h2 id="params">请求参数</h2>
+      <table class="doc-table">
+        <thead><tr><th>参数</th><th>类型</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td><code>amount</code><span class="req">必填</span></td><td>string</td><td>金额，如 <code>"12.34"</code>。最多 2 位小数，必须大于 0，上限 <code>$10,000,000.00</code></td></tr>
+          <tr><td><code>currency</code><span class="opt">可选</span></td><td>string</td><td>币种，当前仅支持 <code>USD</code>（默认）</td></tr>
+          <tr><td><code>reference</code><span class="opt">可选</span></td><td>string</td><td>你的订单号，同一商户内唯一。相同订单号且金额一致时返回同一笔支付；金额不同返回 <code>REFERENCE_CONFLICT</code></td></tr>
+          <tr><td><code>description</code><span class="opt">可选</span></td><td>string</td><td>商品或服务描述，付款人可见，最长 200 字</td></tr>
+          <tr><td><code>customer_email</code><span class="opt">可选</span></td><td>string</td><td>限定付款人。设置后其他账户不能支付该单，返回 <code>CUSTOMER_MISMATCH</code></td></tr>
+          <tr><td><code>metadata</code><span class="opt">可选</span></td><td>object</td><td>自定义键值，序列化后不超过 2KB，会原样出现在查询结果和 Webhook 中</td></tr>
+          <tr><td><code>success_url</code><span class="opt">可选</span></td><td>string</td><td>付款成功后付款人浏览器跳转的地址（http/https）</td></tr>
+          <tr><td><code>cancel_url</code><span class="opt">可选</span></td><td>string</td><td>付款人取消后跳转的地址</td></tr>
+        </tbody>
+      </table>
+
+      <h2 id="request">请求示例</h2>
+      <div class="codeblock">
+        <div class="code-head"><div class="lang-tabs"><button class="active" data-lang="curl">curl</button><button data-lang="python">Python</button><button data-lang="node">Node.js</button></div><button class="copy">复制</button></div>
+<pre data-lang="curl">curl "https://your-domain/api/v1/payments" \
+  -X POST \
+  -H "Authorization: Bearer $SPACEPAY_KEY" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: 6f1c2a9e-3b7d-4c55-9a10-2f8e7d6c5b4a" \
+  -d '{
+    "amount": "12.34",
+    "reference": "order-2026-0001",
+    "description": "拿铁两杯",
+    "metadata": { "sku": "latte" },
+    "success_url": "https://shop.example/paid"
+  }'</pre>
+<pre data-lang="python" hidden>import os
+import requests
+
+resp = requests.post(
+    "https://your-domain/api/v1/payments",
+    headers={
+        "Authorization": f"Bearer {os.environ['SPACEPAY_KEY']}",
+        "Idempotency-Key": "6f1c2a9e-3b7d-4c55-9a10-2f8e7d6c5b4a",
+    },
+    json={
+        "amount": "12.34",
+        "reference": "order-2026-0001",
+        "description": "拿铁两杯",
+        "metadata": {"sku": "latte"},
+        "success_url": "https://shop.example/paid",
+    },
+    timeout=15,
+)
+payment = resp.json()["payment"]
+print(payment["checkout_url"])</pre>
+<pre data-lang="node" hidden>const resp = await fetch('https://your-domain/api/v1/payments', {
+  method: 'POST',
+  headers: {
+    Authorization: `Bearer ${process.env.SPACEPAY_KEY}`,
+    'Content-Type': 'application/json',
+    'Idempotency-Key': '6f1c2a9e-3b7d-4c55-9a10-2f8e7d6c5b4a',
+  },
+  body: JSON.stringify({
+    amount: '12.34',
+    reference: 'order-2026-0001',
+    description: '拿铁两杯',
+    metadata: { sku: 'latte' },
+    success_url: 'https://shop.example/paid',
+  }),
+});
+const { payment } = await resp.json();</pre>
+      </div>
+
+      <h2 id="response">响应字段</h2>
+      <table class="doc-table">
+        <thead><tr><th>字段</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td><code>payment.id</code></td><td>支付单编号，形如 <code>pay_1</code></td></tr>
+          <tr><td><code>payment.numeric_id</code></td><td>纯数字编号，便于数据库存储</td></tr>
+          <tr><td><code>payment.reference</code></td><td>你的订单号；未传时自动生成</td></tr>
+          <tr><td><code>payment.amount_cents</code></td><td>金额（整数分），如 <code>1234</code></td></tr>
+          <tr><td><code>payment.amount</code></td><td>金额（十进制字符串）</td></tr>
+          <tr><td><code>payment.currency</code></td><td><code>USD</code></td></tr>
+          <tr><td><code>payment.status</code></td><td>见下方状态表</td></tr>
+          <tr><td><code>payment.refunded_cents</code></td><td>已退款金额（分）</td></tr>
+          <tr><td><code>payment.refundable_cents</code></td><td>剩余可退金额（分）</td></tr>
+          <tr><td><code>payment.metadata</code></td><td>创建时传入的自定义数据</td></tr>
+          <tr><td><code>payment.checkout_url</code></td><td>付款人结账地址，交给浏览器打开</td></tr>
+          <tr><td><code>payment.created_at</code></td><td>创建时间（毫秒时间戳）</td></tr>
+          <tr><td><code>payment.paid_at</code></td><td>付款时间；未支付时为 <code>null</code></td></tr>
+          <tr><td><code>payment.expires_at</code></td><td>过期时间（创建后 30 分钟）</td></tr>
+        </tbody>
+      </table>
+
+      <h2 id="status">支付状态</h2>
+      <div class="pillrow">
+        <span class="st warn">CREATED</span><span class="st ok">SUCCEEDED</span><span class="st info">PARTIALLY_REFUNDED</span><span class="st">REFUNDED</span><span class="st bad">EXPIRED</span><span class="st bad">CANCELED</span>
+      </div>
+      <table class="doc-table">
+        <thead><tr><th>状态</th><th>含义</th></tr></thead>
+        <tbody>
+          <tr><td><code>CREATED</code></td><td>待支付，等待付款人完成结账</td></tr>
+          <tr><td><code>SUCCEEDED</code></td><td>付款成功</td></tr>
+          <tr><td><code>PARTIALLY_REFUNDED</code></td><td>已部分退款</td></tr>
+          <tr><td><code>REFUNDED</code></td><td>已全额退款</td></tr>
+          <tr><td><code>CANCELED</code></td><td>付款人取消</td></tr>
+          <tr><td><code>EXPIRED</code></td><td>超过 30 分钟未支付</td></tr>
+        </tbody>
+      </table>
+
+      <h2 id="idempotency">幂等与去重</h2>
+      <ul>
+        <li><b>Idempotency-Key</b>：网络超时后用同一个键重试，24 小时内会重放原响应，并返回 <code>Idempotent-Replayed: true</code>；同键不同参数返回 422。</li>
+        <li><b>reference</b>：适合作为业务侧去重键。相同订单号且金额一致时返回同一笔支付，不会重复创建。</li>
+      </ul>
+      <p>两者可以同时使用：<code>Idempotency-Key</code> 保证单次请求的传输安全，<code>reference</code> 保证业务订单唯一。</p>
+
+      <h2 id="notes">注意事项</h2>
+      <ul>
+        <li>支付单 30 分钟后过期，过期后不能再付款，需要重新创建。</li>
+        <li>设置 <code>customer_email</code> 后，只有该邮箱的账户能付款；不确定付款人时不要设置。</li>
+        <li><code>metadata</code> 只用于你的业务数据，不要放密钥、密码等敏感信息。</li>
+        <li>金额是虚拟资金；本环境不产生真实扣款。</li>
+      </ul>
+
+      <div class="callout warn"><span class="ico">!</span><span>不要用前端传来的金额直接创建支付：金额应由你的服务端根据订单计算，否则用户可以篡改价格。</span></div>
+    </article>
+    <nav class="prevnext" id="pageNav"></nav>
+  </main>
+</div>
+<aside class="doc-toc" id="docToc"></aside>
+<script src="/docs/docs.js" defer></script>
+</body>
+</html>
