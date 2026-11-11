@@ -6,8 +6,9 @@
 'use strict';
 
 // ---------- 状态 ----------
+// 会话令牌优先使用 httpOnly cookie（浏览器自动携带），内存中的 token 仅供当前页面内的
+// Bearer 兼容使用，不写入 localStorage：避免 XSS 直接读取长期令牌。
 let token = '';
-try { token = localStorage.getItem('spacepay_token') || localStorage.getItem('pay_token') || ''; } catch (_) { /* 隐私模式 */ }
 let me = null;
 let products = [];
 let simDay = 0;
@@ -21,6 +22,9 @@ let curPreview = null;
 let walletBalance = null;
 const formKeys = {}; // 每个表单一次提交对应一个幂等键；成功后换新，失败重试沿用
 const txCache = new Map(); // 交易 id -> 行数据（详情抽屉用）
+let myPaymentsCache = [];
+let myWithdrawalsCache = [];
+let refundTarget = null;
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s === null || s === undefined ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -80,7 +84,7 @@ function emptyRow(cols, title, desc, action, iconName) {
 const TYPE_LABEL = {
   bonus: '体验金', topup: '充值', transfer_in: '转入', transfer_out: '转出', pay: '付款', refund: '退款',
   withdrawal: '提现', withdrawal_reversal: '提现退回', BUY: '买入', SELL: '卖出', FD_REDEEM: '定存兑付',
-  DIVIDEND: '分红', INTEREST: '利息', demo_reset: '演示重置',
+  DIVIDEND: '分红', INTEREST: '利息', demo_reset: '数据重置',
 };
 const STATUS = {
   SUCCEEDED: ['成功', 'success'], PENDING: ['处理中', 'warning'], FAILED: ['失败', 'danger'],
@@ -92,7 +96,7 @@ const ROLE_LABEL = { customer: '用户', viewer: '只读访客', finance: '财�
 const AUDIT_LABEL = {
   register: '注册', login: '登录', login_failed: '登录失败', logout: '退出登录', set_pin: '设置 PIN', change_pin: '修改 PIN',
   change_password: '修改密码', pin_failed: 'PIN 验证失败', transfer: '转账', pay: '付款', topup: '充值', withdrawal: '申请提现',
-  order: '投资下单', fd_buy: '定存申购', rebalance: '再平衡', demo_reset: '重置演示数据', alert_fired: '价格提醒触发', export: '导出交易',
+  order: '投资下单', fd_buy: '定存申购', rebalance: '再平衡', demo_reset: '重置账户数据', alert_fired: '价格提醒触发', export: '导出交易',
 };
 const CATEGORY_ICON = { 购物: 'shopping-bag', 餐饮: 'coffee', 交通: 'bus', 生活缴费: 'zap', 娱乐: 'clapperboard' };
 const TYPE_ICON = {
@@ -286,15 +290,21 @@ function toast(text, isErr) {
 
 // ---------- 导航 ----------
 function showTab(t) {
-  $('tabLogin').classList.toggle('active', t === 'login'); $('tabRegister').classList.toggle('active', t === 'register');
-  $('loginPane').hidden = t !== 'login'; $('registerPane').hidden = t !== 'register'; msg('authMsg', '');
-  $('authTitle').textContent = t === 'login' ? '欢迎回来' : '创建 SpacePay 账户';
-  $('authLead').textContent = t === 'login' ? '登录 SpacePay，管理你的钱包与投资' : '用邮箱验证码注册，几秒完成';
+  for (const [id, name] of [['tabLogin', 'login'], ['tabRegister', 'register'], ['tabReset', 'reset']]) $(id).classList.toggle('active', t === name);
+  $('loginPane').hidden = t !== 'login'; $('registerPane').hidden = t !== 'register'; $('resetPane').hidden = t !== 'reset';
+  msg('authMsg', '');
+  const copy = {
+    login: ['欢迎回来', '登录 SpacePay，管理你的钱包与投资'],
+    register: ['创建 SpacePay 账户', '用邮箱验证码注册，几秒完成'],
+    reset: ['找回密码', '通过邮箱验证码重置登录密码'],
+  }[t] || ['欢迎回来', ''];
+  $('authTitle').textContent = copy[0];
+  $('authLead').textContent = copy[1];
 }
 function logoutLocal(text) {
   token = ''; me = null;
-  try { localStorage.removeItem('spacepay_token'); localStorage.removeItem('pay_token'); } catch (_) { /* ignore */ }
   $('appShell').hidden = true; $('tabbar').hidden = true; $('authView').hidden = false; $('topMeta').hidden = true;
+  $('notifDot').hidden = true;
   if (text) msg('authMsg', text, true);
 }
 function enterApp() {
@@ -312,6 +322,7 @@ function enterApp() {
   $('consoleNav').hidden = !staff;
   $('roleLabel').textContent = ROLE_LABEL[me.role] || me.role;
   api('/api/health').then((h) => { if (h.invest && h.invest.simulated_day) { simDay = h.invest.simulated_day; $('simDay').innerHTML = icon('clock', 14) + '模拟日 day-' + simDay; } });
+  loadNotifications();
   let v = (location.hash || '').slice(1);
   if (v === 'wallet') v = 'activity'; // 旧链接兼容：钱包已并入交易页
   if (v === 'transfer') { showView('home'); return openTransfer(); }
@@ -332,6 +343,7 @@ function refreshCurrent() {
   const loaders = {
     home: loadHome, activity: loadActivity, invest: loadInvest, settings: loadSettings,
     'c-overview': loadAdminOverview, 'c-tx': () => loadTxTable('admin'), 'c-payments': () => loadAdminPayments(1),
+    'c-refunds': loadRefundRequests, 'c-merchants': loadAdminMerchants, 'c-payouts': loadMerchantPayouts,
     'c-withdrawals': loadAdminWithdrawals, 'c-users': () => loadAdminUsers(1), 'c-recon': () => {}, 'c-logs': () => loadOpLogs(1),
   };
   (loaders[currentView] || (() => {}))();
@@ -355,17 +367,25 @@ function togglePrivacy() { setPrivacy(!privacy); }
 async function requestCode() {
   const email = $('regEmail').value.trim();
   if (!email) return msg('authMsg', '请先填写邮箱', true);
-  const j = await api('/api/auth/request-code', { method: 'POST', body: { email, purpose: 'register' } });
-  msg('authMsg', j.ok ? j.message : errText(j), !j.ok);
-  if (j.ok && j.demo) showDemoInbox();
+  await sendCode(email, 'register', 'demoInbox');
 }
-async function showDemoInbox() {
-  const email = $('regEmail').value.trim();
+async function requestResetCode() {
+  const email = $('resetEmail').value.trim();
+  if (!email) return msg('authMsg', '请先填写注册邮箱', true);
+  await sendCode(email, 'reset_password', 'resetInbox');
+}
+async function sendCode(email, purpose, inboxId) {
+  const j = await api('/api/auth/request-code', { method: 'POST', body: { email, purpose } });
+  msg('authMsg', j.ok ? j.message : errText(j), !j.ok);
+  if (j.ok && j.demo) showDemoInbox(email, inboxId);
+}
+async function showDemoInbox(email, boxId) {
   const j = await api('/api/demo-inbox?email=' + encodeURIComponent(email));
-  const box = $('demoInbox');
+  const box = $(boxId);
+  if (!box) return;
   box.hidden = false;
   if (!j.ok) { box.textContent = errText(j); return; }
-  box.innerHTML = '<div class="hint">演示收件箱（不发送真实邮件）</div>' + (j.items.length ? j.items.map((x) => `验证码 <b class="mono">${esc(x.code)}</b> <span class="hint">${fmtTime(x.created_at)}</span>`).join('<br>') : '暂无验证码');
+  box.innerHTML = '<div class="hint">应用内收件箱（未配置真实邮件通道）</div>' + (j.items.length ? j.items.map((x) => `验证码 <b class="mono">${esc(x.code)}</b> <span class="hint">${fmtTime(x.created_at)}</span>`).join('<br>') : '暂无验证码');
 }
 async function doRegister() {
   const body = { email: $('regEmail').value.trim(), nickname: $('regNickname').value.trim(), password: $('regPassword').value, code: $('regCode').value.trim() };
@@ -373,12 +393,30 @@ async function doRegister() {
   if (!j.ok) return msg('authMsg', errText(j), true);
   showTab('login'); $('loginEmail').value = body.email; msg('authMsg', j.message);
 }
-async function doLogin() {
-  const j = await api('/api/auth/login', { method: 'POST', body: { email: $('loginEmail').value.trim(), password: $('loginPassword').value } });
+async function doResetPassword() {
+  const email = $('resetEmail').value.trim();
+  const body = { email, code: $('resetCodeInput').value.trim(), new_password: $('resetPassword').value };
+  const j = await api('/api/auth/reset-password', { method: 'POST', body });
   if (!j.ok) return msg('authMsg', errText(j), true);
-  token = j.token;
-  try { localStorage.setItem('spacepay_token', token); } catch (_) { /* ignore */ }
-  me = j.user; $('loginPassword').value = '';
+  $('resetPassword').value = ''; $('resetCodeInput').value = '';
+  showTab('login'); $('loginEmail').value = email; msg('authMsg', j.message);
+}
+async function doLogin() {
+  const body = { email: $('loginEmail').value.trim(), password: $('loginPassword').value };
+  const second = $('loginTotp').value.trim();
+  if (second) { if (/^\d{6}$/.test(second)) body.totp_code = second; else body.recovery_code = second; }
+  const j = await api('/api/auth/login', { method: 'POST', body });
+  if (!j.ok) {
+    if (j.code === 'TOTP_REQUIRED' || j.code === 'TOTP_INVALID') {
+      $('loginTotpField').hidden = false;
+      $('loginTotp').focus();
+    }
+    return msg('authMsg', errText(j), true);
+  }
+  token = j.token; // 仅保存在内存；持久会话由 httpOnly cookie 承担
+  me = j.user; $('loginPassword').value = ''; $('loginTotp').value = ''; $('loginTotpField').hidden = true;
+  const next = new URLSearchParams(location.search).get('next');
+  if (next && next.startsWith('/') && !next.startsWith('//')) { location.href = next; return; }
   enterApp();
   if (!me.has_pin) setTimeout(() => { showView('settings'); toast('先设置 6 位支付 PIN，就可以转账和付款了'); }, 0);
 }
@@ -454,14 +492,16 @@ async function loadActivity() {
     $('wDefs').innerHTML = ['inflow', 'outflow', 'investment_income', 'investment_net'].map((k) => `<li>${esc(st.definitions[k])}</li>`).join('');
   }
   if (pays.ok) {
+    myPaymentsCache = pays.items;
     $('payCount').textContent = pays.items.length ? ' ' + pays.items.length : '';
-    $('myPayments').innerHTML = pays.items.map((p) => `<tr><td>${fmtTime(p.created_at)}</td>${tdTrunc(p.merchant)}<td>${esc(p.category || '—')}</td><td>${badge(STATUS, p.status)}</td><td class="num">${money(p.amount_cents)}</td><td class="num">${p.refunded_cents ? money(p.refunded_cents) : '—'}</td></tr>`).join('')
-      || emptyRow(6, '还没有付款记录', '向商户付款后，可以在这里查看付款与退款状态。', `<button class="btn sm" onclick="openSheet('payModal')">付款</button>`, 'credit-card');
+    $('myPayments').innerHTML = pays.items.map((p) => `<tr><td>${fmtTime(p.created_at)}</td>${tdTrunc(p.merchant)}<td>${esc(p.category || '—')}</td><td>${badge(STATUS, p.status)}</td><td class="num">${money(p.amount_cents)}</td><td class="num">${p.refunded_cents ? money(p.refunded_cents) : '—'}</td><td class="act">${p.refundable_cents > 0 && ['SUCCEEDED', 'PARTIALLY_REFUNDED'].includes(p.status) ? `<button class="btn sm ghost" onclick="openRefundRequest(${p.id})">申请退款</button>` : ''}</td></tr>`).join('')
+      || emptyRow(7, '还没有付款记录', '向商户付款后，可以在这里查看付款与退款状态。', `<button class="btn sm" onclick="openSheet('payModal')">付款</button>`, 'credit-card');
   }
   if (wds.ok) {
+    myWithdrawalsCache = wds.items;
     $('wdCount').textContent = wds.items.length ? ' ' + wds.items.length : '';
-    $('myWithdrawals').innerHTML = wds.items.map((x) => `<tr><td>${fmtTime(x.created_at)}</td><td>尾号 ${esc(x.destination)}</td><td>${badge(W_STATUS, x.status)}</td>${tdTrunc(x.review_note || '—')}<td class="num">${money(x.amount_cents)}</td></tr>`).join('')
-      || emptyRow(5, '还没有提现记录', '提现提交后由财务审核，驳回的提现原路退回钱包。', '<button class="btn sm" onclick="openWithdraw()">提现</button>', 'landmark');
+    $('myWithdrawals').innerHTML = wds.items.map((x) => `<tr><td>${fmtTime(x.created_at)}</td><td>尾号 ${esc(x.destination)}</td><td>${badge(W_STATUS, x.status)}</td>${tdTrunc(x.review_note || '—')}<td class="num">${money(x.amount_cents)}</td><td class="act">${x.status === 'PENDING' ? `<button class="btn sm ghost" onclick="cancelWithdrawal(${x.id})">撤销</button>` : ''}</td></tr>`).join('')
+      || emptyRow(6, '还没有提现记录', '提现提交后由财务审核，驳回的提现原路退回钱包。', '<button class="btn sm" onclick="openWithdraw()">提现</button>', 'landmark');
   }
 }
 
@@ -501,6 +541,38 @@ function doPay() {
 function doWithdraw() {
   return moneyAction('withdraw', '/api/withdrawals', { amount: $('wdAmount').value.trim(), destination: $('wdDest').value.trim(), pin: $('wdPin').value.trim() }, 'wdMsg', null, 'withdrawModal')
     .then((j) => { if (j) { $('wdPin').value = ''; $('wdAmount').value = ''; } });
+}
+
+// ---------- 退款申请 / 撤销提现 ----------
+function openRefundRequest(id) {
+  const p = myPaymentsCache.find((x) => x.id === id);
+  if (!p) return;
+  refundTarget = p;
+  $('refundInfo').innerHTML = `<dt>商户</dt><dd>${esc(p.merchant)}</dd><dt>支付金额</dt><dd>${cents(p.amount_cents)}</dd><dt>可退金额</dt><dd>${cents(p.refundable_cents)}</dd><dt>支付时间</dt><dd>${fmtTime(p.created_at)}</dd>`;
+  $('rfReqAmount').value = (p.refundable_cents / 100).toFixed(2);
+  $('rfReqReason').value = '';
+  msg('rfReqMsg', '');
+  openSheet('refundSheet');
+}
+async function submitRefundRequest() {
+  if (!refundTarget) return;
+  const body = { amount: $('rfReqAmount').value.trim(), reason: $('rfReqReason').value.trim() };
+  if (body.reason.length < 2) return msg('rfReqMsg', '请填写退款原因', true);
+  const j = await api('/api/payments/' + refundTarget.id + '/refund-requests', { method: 'POST', body, idemKey: keyFor('refundReq') });
+  if (!j.ok) return msg('rfReqMsg', errText(j), true);
+  resetKey('refundReq');
+  closeModal('refundSheet');
+  toast(j.message);
+  refundTarget = null;
+  loadActivity();
+}
+async function cancelWithdrawal(id) {
+  const j = await submitConfirmed('/api/withdrawals/' + id + '/cancel', {}, keyFor('wdCancel'));
+  if (j.cancelled) return;
+  if (!j.ok) return toast(errText(j), true);
+  resetKey('wdCancel');
+  toast(j.message);
+  refreshCurrent();
 }
 
 // ---------- 交易表（我的流水 / 运营后台交易 共用） ----------
@@ -865,6 +937,7 @@ function renderProfileTags() {
 const THEME_LABEL = { system: '跟随系统', light: '浅色', dark: '深色' };
 function loadSettings() {
   $('pinStatus').innerHTML = me.has_pin ? '<span class="badge success">已设置</span>' : '<span class="badge warning">未设置</span>';
+  $('totpStatus').innerHTML = me.totp_enabled ? '<span class="badge success">已开启</span>' : '<span class="badge">未开启</span>';
   syncThemeUi();
   syncPrivacyUi();
   const standalone = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone;
@@ -875,6 +948,121 @@ function loadSettings() {
     const last = j.items.find((a) => a.action === 'login');
     $('auditSub').textContent = last ? `上次登录 ${fmtTime(last.created_at)}${last.ip ? ' · ' + last.ip : ''}` : '登录、资金与安全设置记录';
   });
+  api('/api/security/sessions').then((j) => {
+    if (j.ok) $('sessionStatus').textContent = j.count > 1 ? `${j.count} 台设备` : '本机';
+  });
+  api('/api/merchant/status').then((j) => {
+    if (!j.ok) return;
+    const st = j.merchant && j.merchant.status;
+    $('merchantStatus').textContent = st === 'ACTIVE' ? '已开通' : st === 'PENDING' ? '审核中' : st === 'SUSPENDED' ? '已暂停' : '未申请';
+  });
+  loadNotifications();
+}
+
+// ---------- 登录设备 ----------
+let sessionItems = [];
+function uaLabel(ua) {
+  const s = String(ua || '');
+  const os = /iPhone|iPad/.test(s) ? 'iOS' : /Android/.test(s) ? 'Android' : /Mac OS X/.test(s) ? 'macOS' : /Windows/.test(s) ? 'Windows' : /Linux/.test(s) ? 'Linux' : '未知系统';
+  const br = /Edg\//.test(s) ? 'Edge' : /Chrome\//.test(s) ? 'Chrome' : /Safari\//.test(s) && !/Chrome/.test(s) ? 'Safari' : /Firefox\//.test(s) ? 'Firefox' : '浏览器';
+  return `${os} · ${br}`;
+}
+async function openSessions() {
+  msg('sessionsMsg', '');
+  openSheet('sessionsSheet');
+  const j = await api('/api/security/sessions');
+  if (!j.ok) { $('sessionsList').innerHTML = `<li class="feed-empty">${esc(errText(j))}</li>`; return; }
+  sessionItems = j.items;
+  $('sessionsList').innerHTML = j.items.map((s) => `<li><div class="feed-item" style="cursor:default">
+    <span class="feed-avatar brand">${icon(s.current ? 'monitor' : 'smartphone', 18)}</span>
+    <span class="feed-main"><span class="feed-title" style="display:block">${esc(uaLabel(s.user_agent))}${s.current ? ' <span class="badge success">当前设备</span>' : ''}</span>
+    <span class="feed-sub">${esc(s.ip || '未知 IP')} · 最近活动 ${fmtTime(s.last_seen_at)} · 登录于 ${fmtTime(s.created_at)}</span></span>
+    <span class="feed-amt">${s.current ? '' : `<button class="btn sm ghost" onclick="revokeSession(${s.id})">注销</button>`}</span></div></li>`).join('')
+    || '<li class="feed-empty">没有活跃会话</li>';
+}
+async function revokeSession(id) {
+  const j = await api('/api/security/sessions/' + id, { method: 'DELETE' });
+  msg('sessionsMsg', j.ok ? j.message : errText(j), !j.ok);
+  if (j.ok) openSessions();
+}
+async function revokeOtherSessions() {
+  const j = await api('/api/security/sessions/revoke-others', { method: 'POST' });
+  msg('sessionsMsg', j.ok ? j.message : errText(j), !j.ok);
+  toast(j.ok ? j.message : errText(j), !j.ok);
+  if (j.ok) { openSessions(); loadSettings(); }
+}
+
+// ---------- 两步验证 ----------
+function openTotp() {
+  for (const id of ['totpSetup', 'totpConfirm', 'totpRecovery', 'totpDisable']) $(id).hidden = true;
+  $('totpTitle').textContent = me.totp_enabled ? '关闭两步验证' : '开启两步验证';
+  if (me.totp_enabled) $('totpDisable').hidden = false; else $('totpSetup').hidden = false;
+  msg('totpPwMsg', ''); msg('totpMsg', ''); msg('totpOffMsg', '');
+  openSheet('totpSheet');
+}
+async function startTotp() {
+  const j = await api('/api/security/totp/setup', { method: 'POST', body: { password: $('totpPw').value } });
+  if (!j.ok) return msg('totpPwMsg', errText(j), true);
+  $('totpSecret').textContent = j.secret;
+  $('totpUri').textContent = j.otpauth_uri;
+  $('totpCode').value = '';
+  $('totpSetup').hidden = true; $('totpConfirm').hidden = false;
+}
+async function enableTotp() {
+  const j = await api('/api/security/totp/enable', { method: 'POST', body: { code: $('totpCode').value.trim() } });
+  if (!j.ok) return msg('totpMsg', errText(j), true);
+  me.totp_enabled = true;
+  $('totpConfirm').hidden = true; $('totpRecovery').hidden = false;
+  $('totpCodes').textContent = j.recovery_codes.join('\n');
+  toast('两步验证已开启');
+}
+async function disableTotp() {
+  const j = await api('/api/security/totp/disable', { method: 'POST', body: { password: $('totpOffPw').value, code: $('totpOffCode').value.trim() } });
+  if (!j.ok) return msg('totpOffMsg', errText(j), true);
+  me.totp_enabled = false;
+  $('totpOffPw').value = ''; $('totpOffCode').value = '';
+  closeModal('totpSheet');
+  toast(j.message);
+  loadSettings();
+}
+
+// ---------- 通知 ----------
+let notifItems = [];
+const NOTIF_ICON = { transfer: 'arrow-down-left', payment: 'credit-card', refund: 'undo-2', withdrawal: 'landmark', sale: 'banknote', merchant: 'shopping-bag', payout: 'landmark', refund_request: 'receipt', system: 'bell' };
+async function loadNotifications() {
+  const j = await api('/api/notifications?limit=30');
+  if (!j.ok) return;
+  notifItems = j.items;
+  $('notifDot').hidden = !j.unread;
+  $('notifDot').title = j.unread ? `${j.unread} 条未读` : '';
+}
+function renderNotifications() {
+  $('notifList').innerHTML = notifItems.length ? notifItems.map((n) => `<li><div class="feed-item" style="cursor:default">
+    <span class="feed-avatar brand" ${n.read_at ? 'style="opacity:.55"' : ''}>${icon(NOTIF_ICON[n.kind] || 'bell', 18)}</span>
+    <span class="feed-main"><span class="feed-title" style="display:block">${esc(n.title)}${n.read_at ? '' : ' <i class="notif-dot" style="position:static;display:inline-block;width:6px;height:6px;box-shadow:none"></i>'}</span>
+    <span class="feed-sub">${esc(n.body || '')}</span></span>
+    <span class="feed-amt" style="font-weight:400"><small style="margin:0">${fmtClock(n.created_at)}</small><small>${dayLabel(n.created_at)}</small></span></div></li>`).join('')
+    : '<li class="feed-empty">暂无通知</li>';
+}
+function openNotifications() { renderNotifications(); openSheet('notifSheet'); api('/api/notifications/read-all', { method: 'POST' }).then(() => { $('notifDot').hidden = true; }); }
+async function markAllRead() {
+  await api('/api/notifications/read-all', { method: 'POST' });
+  notifItems = notifItems.map((n) => ({ ...n, read_at: n.read_at || Date.now() }));
+  renderNotifications();
+  $('notifDot').hidden = true;
+}
+
+// ---------- 注销账户 ----------
+async function closeAccount() {
+  const password = $('closePw').value;
+  if (!password) return msg('closeMsg', '请输入登录密码', true);
+  const j = await submitConfirmed('/api/account/close', { password });
+  if (j.cancelled) return;
+  if (!j.ok) return msg('closeMsg', errText(j), true);
+  $('closePw').value = '';
+  closeModal('closeSheet');
+  toast(j.message);
+  setTimeout(() => logoutLocal('账户已注销'), 800);
 }
 function openPinSheet() {
   $('pinSetForm').hidden = !!me.has_pin;
@@ -1073,6 +1261,105 @@ function reviewW(id, approve) {
     done: loadAdminWithdrawals,
   });
 }
+// ---------- 运营后台：商户 / 退款申请 / 商户结算 ----------
+const M_STATUS = { PENDING: ['待审核', 'warning'], ACTIVE: ['正常', 'success'], SUSPENDED: ['已暂停', 'danger'], REJECTED: ['已拒绝', ''] };
+const RR_STATUS = { PENDING: ['待审核', 'warning'], APPROVED: ['已通过', 'success'], REJECTED: ['已驳回', 'danger'] };
+const MPO_STATUS = { PENDING: ['待审核', 'warning'], SUCCEEDED: ['已出款', 'success'], FAILED: ['已驳回', 'danger'] };
+
+let merchantFilter = 'PENDING';
+let merchantsCache = [];
+function setMerchantStatus(s) {
+  merchantFilter = s;
+  document.querySelectorAll('#cmTabs .tab').forEach((b) => b.classList.toggle('active', b.dataset.s === s));
+  loadAdminMerchants();
+}
+async function loadAdminMerchants() {
+  const j = await api('/api/admin/merchants' + (merchantFilter ? '?status=' + merchantFilter : ''));
+  if (!j.ok) return;
+  merchantsCache = j.items;
+  const manage = can('merchant.manage');
+  $('cmBody').innerHTML = j.items.map((m) => {
+    let acts = '';
+    if (manage) {
+      if (m.status === 'PENDING') acts = `<span class="row" style="flex-wrap:nowrap;justify-content:flex-end"><button class="btn sm danger" onclick="merchantAct(${m.id},'reject')">拒绝</button><button class="btn sm primary" onclick="merchantAct(${m.id},'approve')">通过</button></span>`;
+      else if (m.status === 'ACTIVE') acts = `<button class="btn sm danger" onclick="merchantAct(${m.id},'suspend')">暂停</button>`;
+      else if (m.status === 'SUSPENDED') acts = `<button class="btn sm" onclick="merchantAct(${m.id},'activate')">恢复</button>`;
+    }
+    return `<tr><td class="id">#${m.id}</td>${tdTrunc(m.name)}${tdTrunc(m.owner_email || m.email)}<td>${badge(M_STATUS, m.status)}</td><td class="num">${cents(m.available_cents)}</td><td class="num">${cents(m.pending_payout_cents)}</td><td class="act">${acts}</td></tr>`;
+  }).join('') || emptyRow(7, '没有符合条件的商户', '商户入驻申请会出现在这里。', '', 'shopping-bag');
+}
+function merchantAct(id, action) {
+  const m = merchantsCache.find((x) => x.id === id);
+  const cfg = {
+    approve: { title: '通过商户入驻', reason: false, danger: false },
+    reject: { title: '拒绝商户入驻', reason: true, danger: true, reasonLabel: '拒绝原因（必填）' },
+    suspend: { title: '暂停商户', reason: true, danger: true, reasonLabel: '暂停原因（必填）' },
+    activate: { title: '恢复商户', reason: false, danger: false },
+  }[action];
+  openOp({
+    title: cfg.title, path: `/api/admin/merchants/${id}/${action}`, danger: cfg.danger,
+    reason: cfg.reason, reasonLabel: cfg.reasonLabel,
+    info: [['商户', m.name], ['邮箱', m.owner_email || m.email], ['当前状态', (M_STATUS[m.status] || [m.status])[0]]],
+    done: loadAdminMerchants,
+  });
+}
+
+let refundReqFilter = 'PENDING';
+let refundReqsCache = [];
+function setRefundReqStatus(s) {
+  refundReqFilter = s;
+  document.querySelectorAll('#crTabs .tab').forEach((b) => b.classList.toggle('active', b.dataset.s === s));
+  loadRefundRequests();
+}
+async function loadRefundRequests() {
+  const j = await api('/api/admin/refund-requests' + (refundReqFilter ? '?status=' + refundReqFilter : ''));
+  if (!j.ok) return;
+  refundReqsCache = j.items;
+  const review = can('refund_request.review');
+  $('crBody').innerHTML = j.items.map((r) => `<tr><td class="id">#${r.id}</td><td>${fmtTime(r.created_at)}</td>${tdTrunc(r.user_email)}${tdTrunc(r.payment ? r.payment.merchant : '—')}${tdTrunc(r.reason)}
+    <td class="num">${cents(r.amount_cents)}</td><td>${badge(RR_STATUS, r.status)}</td>
+    <td class="act">${review && r.status === 'PENDING' ? `<span class="row" style="flex-wrap:nowrap;justify-content:flex-end"><button class="btn sm danger" onclick="reviewRefundReq(${r.id},false)">驳回</button><button class="btn sm primary" onclick="reviewRefundReq(${r.id},true)">通过并退款</button></span>` : ''}</td></tr>`).join('')
+    || emptyRow(8, refundReqFilter === 'PENDING' ? '没有待审核的退款申请' : '没有记录', refundReqFilter === 'PENDING' ? '用户提交的退款申请会出现在这里。' : '', '', 'undo-2');
+}
+function reviewRefundReq(id, approve) {
+  const r = refundReqsCache.find((x) => x.id === id);
+  openOp({
+    title: approve ? '通过退款申请' : '驳回退款申请',
+    path: `/api/admin/refund-requests/${id}/${approve ? 'approve' : 'reject'}`,
+    danger: !approve, reasonLabel: '审核备注（选填，用户可见）', reasonDefault: '',
+    info: [['申请编号', '#' + r.id], ['用户', r.user_email], ['商户', r.payment ? r.payment.merchant : '—'], ['申请金额', cents(r.amount_cents)], ['原因', r.reason]],
+    done: loadRefundRequests,
+  });
+}
+
+let merchantPayoutFilter = 'PENDING';
+let merchantPayoutsCache = [];
+function setMerchantPayoutStatus(s) {
+  merchantPayoutFilter = s;
+  document.querySelectorAll('#cpoTabs .tab').forEach((b) => b.classList.toggle('active', b.dataset.s === s));
+  loadMerchantPayouts();
+}
+async function loadMerchantPayouts() {
+  const j = await api('/api/admin/merchant-payouts' + (merchantPayoutFilter ? '?status=' + merchantPayoutFilter : ''));
+  if (!j.ok) return;
+  merchantPayoutsCache = j.items;
+  const review = can('merchant.payout.review');
+  $('cpoBody').innerHTML = j.items.map((p) => `<tr><td class="id">#${p.numeric_id}</td><td>${fmtTime(p.created_at)}</td>${tdTrunc(p.merchant_name || '#' + p.merchant_id)}${tdTrunc(p.destination || '—')}
+    <td class="num">${cents(p.amount_cents)}</td><td>${badge(MPO_STATUS, p.status)}</td>
+    <td class="act">${review && p.status === 'PENDING' ? `<span class="row" style="flex-wrap:nowrap;justify-content:flex-end"><button class="btn sm danger" onclick="reviewMerchantPayout(${p.numeric_id},false)">驳回</button><button class="btn sm primary" onclick="reviewMerchantPayout(${p.numeric_id},true)">批准出款</button></span>` : ''}</td></tr>`).join('')
+    || emptyRow(7, merchantPayoutFilter === 'PENDING' ? '没有待审核的结算' : '没有记录', '', '', 'banknote');
+}
+function reviewMerchantPayout(id, approve) {
+  const p = merchantPayoutsCache.find((x) => x.numeric_id === id);
+  openOp({
+    title: approve ? '批准商户结算' : '驳回商户结算',
+    path: `/api/admin/merchant-payouts/${id}/${approve ? 'approve' : 'reject'}`,
+    danger: !approve, reasonLabel: approve ? '审核备注（选填）' : '驳回原因（必填）', reasonDefault: '',
+    info: [['结算编号', '#' + p.numeric_id], ['商户', p.merchant_name || '#' + p.merchant_id], ['金额', cents(p.amount_cents)], ['收款账户', p.destination || '—']],
+    done: loadMerchantPayouts,
+  });
+}
+
 let usersCache = [];
 async function loadAdminUsers(page) {
   const qs = new URLSearchParams({ page, page_size: 20 });
@@ -1160,10 +1447,18 @@ if ('serviceWorker' in navigator && location.protocol !== 'file:') {
 }
 
 // ---------- 启动：恢复登录 ----------
+window.addEventListener('hashchange', () => {
+  const v = location.hash.slice(1);
+  if (me && v && $('view-' + v) && (!v.startsWith('c-') || can('console.read'))) showView(v);
+});
 (async () => {
   updateNet();
-  if (!token) return;
-  $('authView').hidden = true; // 正在恢复会话，避免闪现登录框
+  // 会话可能保存在 httpOnly cookie 中（localStorage 不再存令牌），因此总是尝试恢复一次
   const j = await api('/api/me');
-  if (j.ok) { me = j.user; enterApp(); } else logoutLocal(j.status === 0 ? j.error : undefined);
+  if (j.ok) { me = j.user; enterApp(); }
+  else {
+    $('authView').hidden = false;
+    if (j.status === 0) msg('authMsg', j.error, true);
+    else if (j.code === 'ACCOUNT_CLOSED') msg('authMsg', '该账户已注销', true);
+  }
 })();

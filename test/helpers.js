@@ -17,6 +17,8 @@ async function startApp(env = {}) {
     DATABASE_PATH: path.join(dir, env.DB_BACKEND === 'json' ? 'app.json' : 'app.db'),
     LOG_LEVEL: 'silent', DEMO_MODE: 'true', RATE_LIMIT_MAX: '100000', AUTH_RATE_LIMIT_MAX: '100000',
     ADMIN_EMAILS: 'admin@spacepay.test', SESSION_SECRET: 'test-secret-'.padEnd(40, 'x'),
+    // 测试绝不发送真实邮件：清空本地 .env 里可能存在的邮件配置，强制走应用内收件箱
+    MAIL_SMTP_HOST: '', MAIL_SMTP_USER: '', MAIL_SMTP_PASS: '', MAIL_WEBHOOK_URL: '',
   }, env);
   const { createApp } = require('../src/server');
   const ctx = createApp();

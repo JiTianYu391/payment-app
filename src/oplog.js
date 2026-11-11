@@ -15,14 +15,28 @@ function record(db, req, entry) {
 
 const ACTION_LABELS = {
   'refund.create': '发起退款',
+  'refund_request.approve': '批准退款申请',
+  'refund_request.reject': '驳回退款申请',
   'user.freeze': '冻结账户',
   'user.unfreeze': '解冻账户',
   'user.role': '调整角色',
   'withdrawal.create': '申请提现',
+  'withdrawal.cancel': '撤销提现',
   'withdrawal.approve': '批准提现',
   'withdrawal.reject': '驳回提现',
   'tx.export': '导出交易',
   'reconcile.run': '运行对账',
+  'merchant.approve': '通过商户入驻',
+  'merchant.reject': '拒绝商户入驻',
+  'merchant.suspend': '暂停商户',
+  'merchant.activate': '恢复商户',
+  'merchant.refund': '商户退款',
+  'merchant.key.create': '创建 API Key',
+  'merchant.key.revoke': '吊销 API Key',
+  'merchant.webhook_secret': '重置 Webhook 密钥',
+  'merchant.payout.create': '申请商户结算',
+  'merchant.payout.approve': '批准商户结算',
+  'merchant.payout.reject': '驳回商户结算',
 };
 
 module.exports = { record, ACTION_LABELS };

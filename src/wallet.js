@@ -56,7 +56,8 @@ function applyCash(db, p) {
     journalType: p.journalType || p.type,
     entries: [
       { account: ledger.WALLET, user_id: p.userId, amount_cents: p.delta },
-      { account: ledger.contraFor(p.journalType || p.type, p.contra), amount_cents: -p.delta },
+      // contraUserId：对手科目不是钱包时（如 merchant:payable 按商户记账）指定其主体编号
+      { account: ledger.contraFor(p.journalType || p.type, p.contra), user_id: p.contraUserId === undefined ? null : p.contraUserId, amount_cents: -p.delta },
     ],
     refType: p.refType || 'transaction',
     refId: p.refId === undefined ? tx.lastInsertRowid : p.refId,

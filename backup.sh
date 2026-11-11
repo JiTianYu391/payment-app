@@ -1,51 +1,50 @@
 #!/bin/sh
-# 数据库备份 — PandaStack Apps 适配版（无 Docker、无 sqlite3 依赖）
-# 备份的是当前 DATABASE_PATH 指向的文件：
-#   - /workspace/data/app.json（推荐：已挂载 1 GiB 卷时，默认后端）
-#   - /workspace/data/app.db（SQLite 后端时）
-#   - ./data/app.json 或 ./data/app.db（未挂载卷、本地开发时）
-# 用法：在项目目录执行 sh backup.sh
-# 备份文件保存在 ./backups/app-YYYYMMDD-HHMMSS.json.gz（或 .db.gz）
-# 注意：PandaStack 每次部署都是全新机器，备份文件不要只留在沙箱里，
-# 请下载到本地电脑；最稳妥的是数据本身就放在已挂载的 Volume 上。
+# 数据库备份（无 Docker、无 sqlite3 依赖）
+# 备份当前 DATABASE_PATH 指向的文件：
+#   - SQLite：调用 node scripts/backup.js（VACUUM INTO 热备份 + 完整性/账本一致性校验）
+#   - JSON：先校验 JSON 可解析，再 gzip 复制
+# 备份文件保存在 ./backups/ 下。JSON 后端不支持热备份结构语义，建议优先使用 SQLite。
+# 恢复方法见脚本末尾。
 set -e
 cd "$(dirname "$0")"
 mkdir -p backups
 TS=$(date +%Y%m%d-%H%M%S)
 
-# 按 DATABASE_PATH 环境变量（未设置时按默认规则）定位数据库文件
 DBFILE="${DATABASE_PATH:-}"
 if [ -z "$DBFILE" ]; then
-  if [ -f /workspace/data/app.json ]; then DBFILE="/workspace/data/app.json";
-  elif [ -f /workspace/data/app.db ]; then DBFILE="/workspace/data/app.db";
-  elif [ -f data/app.json ]; then DBFILE="data/app.json";
+  if [ -f /workspace/data/app.db ]; then DBFILE="/workspace/data/app.db";
+  elif [ -f /workspace/data/app.json ]; then DBFILE="/workspace/data/app.json";
   elif [ -f data/app.db ]; then DBFILE="data/app.db";
+  elif [ -f data/app.json ]; then DBFILE="data/app.json";
   fi
 fi
+# 兼容 DB_BACKEND=json 且 DATABASE_PATH 以 .db 结尾时实际存成 .db.json 的情况
+if [ -n "$DBFILE" ] && [ ! -f "$DBFILE" ] && [ -f "$DBFILE.json" ]; then DBFILE="$DBFILE.json"; fi
 
 if [ -z "$DBFILE" ] || [ ! -f "$DBFILE" ]; then
-  # 兼容强制 JSON 后端时 .db 路径实际存为 .db.json 的情况
-  #（DB_BACKEND=json + DATABASE_PATH=./data/app.db → ./data/app.db.json）
-  if [ -n "$DBFILE" ] && [ -f "$DBFILE.json" ]; then
-    DBFILE="$DBFILE.json"
-  fi
-fi
-
-if [ -z "$DBFILE" ] || [ ! -f "$DBFILE" ]; then
-  echo "没有找到数据库文件（/workspace/data/app.json、/workspace/data/app.db、data/app.json 或 data/app.db），可能应用还未启动过"
+  echo "没有找到数据库文件（/workspace/data/app.db、/workspace/data/app.json、data/app.db 或 data/app.json），可能应用还未启动过"
   exit 1
 fi
 
 case "$DBFILE" in
-  *.json) OUT="backups/app-$TS.json" ;;
-  *.db)   OUT="backups/app-$TS.db" ;;
-  *) echo "无法识别的数据库文件类型：$DBFILE"; exit 1 ;;
+  *.db)
+    BACKUP_DIR="$PWD/backups" node scripts/backup.js
+    ;;
+  *.json)
+    OUT="backups/app-$TS.json"
+    node -e "JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8'))" "$DBFILE"
+    cp "$DBFILE" "$OUT"
+    gzip -f "$OUT"
+    echo "备份完成：$OUT.gz（来源：$DBFILE，JSON 解析校验通过）"
+    ;;
+  *)
+    echo "无法识别的数据库文件类型：$DBFILE"
+    exit 1
+    ;;
 esac
-cp "$DBFILE" "$OUT"
-gzip -f "$OUT"
-echo "备份完成：$OUT.gz（来源：$DBFILE）"
+
 ls -lh backups/ | tail -n 10
-echo "恢复方法：解压后覆盖 $DBFILE，然后在 PandaStack 控制台重新部署或重启 App："
-echo "  gunzip $OUT.gz"
-echo "  cp $OUT $DBFILE"
-echo "建议：每周备份一次，并把备份下载到本地电脑，不要只留在沙箱/卷上。"
+echo "恢复方法："
+echo "  SQLite：确认应用已停止，解压备份后覆盖 $DBFILE"
+echo "  JSON：gunzip 备份文件后覆盖 $DBFILE"
+echo "建议：定期备份，并把备份下载/同步到本机之外。"

@@ -4,7 +4,7 @@
 //   不用 stale-while-revalidate：发布新版后它会让新 HTML 配上旧 app.js，元素对不上导致页面出错；
 // - /api/ 请求一律不经过缓存：余额与交易数据必须实时，断网时由页面提示。
 // 发布新版本时修改 VERSION，旧缓存会在 activate 时清理。
-const VERSION = 'spacepay-3.1.1';
+const VERSION = 'spacepay-4.0.0';
 const SHELL = [
   '/', '/styles.css', '/app.js', '/charts.js', '/icons.js', '/manifest.webmanifest',
   '/brand/favicon.svg', '/brand/spacepay-logo-light.svg', '/brand/spacepay-logo-dark.svg',

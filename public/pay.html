@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>付款 · SpacePay</title>
+<meta name="robots" content="noindex">
+<meta name="theme-color" content="#FFFFFF" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#141920" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="/brand/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/styles.css">
+<script>try { var t = localStorage.getItem('spacepay_theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}</script>
+<style>
+  .pay-page { min-height: 100vh; display: flex; flex-direction: column; align-items: center; padding: 24px 16px 48px; background: var(--bg); }
+  .pay-head { width: 100%; max-width: 440px; display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+  .pay-head img { height: 22px; }
+  .pay-card { width: 100%; max-width: 440px; background: var(--surface); border-radius: 16px; box-shadow: var(--shadow-card); overflow: hidden; }
+  .pay-body { padding: 28px 24px 24px; }
+  .pay-merchant { display: flex; align-items: center; gap: 12px; margin-bottom: 22px; }
+  .pay-avatar { width: 44px; height: 44px; border-radius: 12px; display: flex; align-items: center; justify-content: center; background: var(--brand-soft); color: var(--brand); font-weight: 700; font-size: 18px; }
+  .pay-merchant b { display: block; font-size: 15px; }
+  .pay-merchant span { color: var(--text-3); font-size: 12px; }
+  .pay-amount { font-size: 40px; font-weight: 600; letter-spacing: -.02em; font-variant-numeric: tabular-nums; margin: 6px 0 4px; }
+  .pay-desc { color: var(--text-2); font-size: 13px; margin-bottom: 4px; }
+  .pay-ref { color: var(--text-3); font-size: 12px; font-family: var(--font-mono); }
+  .pay-sep { border: 0; border-top: 1px solid var(--border); margin: 20px 0; }
+  .pay-row { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; color: var(--text-2); padding: 6px 0; }
+  .pay-row b { color: var(--text-1); font-weight: 500; }
+  .pay-label { display: block; font-size: 13px; color: var(--text-2); margin: 14px 0 6px; }
+  .pay-pin { width: 100%; height: 48px; border: 1px solid var(--border-strong); border-radius: 10px; background: var(--surface); color: var(--text-1); font: 22px/1 var(--font-mono); letter-spacing: 10px; text-align: center; padding: 0 12px; }
+  .pay-pin:focus { outline: none; border-color: var(--brand); box-shadow: var(--focus); }
+  .pay-actions { display: flex; gap: 10px; margin-top: 18px; }
+  .pay-actions .btn { flex: 1; }
+  .pay-note { margin-top: 14px; font-size: 12px; color: var(--text-3); line-height: 1.7; }
+  .pay-state { text-align: center; padding: 36px 24px; }
+  .pay-state .icon { width: 56px; height: 56px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; margin-bottom: 14px; font-size: 26px; }
+  .pay-state.ok .icon { background: var(--success-bg); color: var(--success); }
+  .pay-state.bad .icon { background: var(--danger-bg); color: var(--danger); }
+  .pay-state h1 { font-size: 20px; margin-bottom: 6px; }
+  .pay-state p { color: var(--text-2); font-size: 13px; }
+  .msg { margin-top: 12px; font-size: 13px; color: var(--success); min-height: 18px; }
+  .msg.err { color: var(--danger); }
+  .pay-foot { margin-top: 14px; color: var(--text-3); font-size: 11px; text-align: center; line-height: 1.7; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<div class="pay-page">
+  <header class="pay-head">
+    <a href="/" aria-label="SpacePay"><picture><source srcset="/brand/spacepay-logo-dark.svg" media="(prefers-color-scheme: dark)"><img src="/brand/spacepay-logo-light.svg" alt="SpacePay"></picture></a>
+    <a class="btn sm ghost" href="/" id="accountLink">我的账户</a>
+  </header>
+
+  <main class="pay-card" id="card">
+    <div class="pay-body" id="loading">
+      <p style="color:var(--text-3);font-size:13px">正在加载支付信息…</p>
+    </div>
+
+    <div id="payPane" hidden>
+      <div class="pay-body">
+        <div class="pay-merchant"><span class="pay-avatar" id="merchantAvatar">商</span><div><b id="merchantName">商户</b><span id="merchantSite"></span></div></div>
+        <div class="pay-amount" id="amountText">—</div>
+        <div class="pay-desc" id="descText"></div>
+        <div class="pay-ref" id="refText"></div>
+        <hr class="pay-sep">
+        <div class="pay-row"><span>支付方式</span><b>SpacePay 钱包余额</b></div>
+        <div class="pay-row"><span>付款账户</span><b id="payerText">—</b></div>
+
+        <div id="loginPrompt" hidden>
+          <p class="pay-note">请先登录 SpacePay 账户，再完成付款。付款后余额将从你的钱包扣除。</p>
+          <div class="pay-actions"><a class="btn primary btn-full" id="loginBtn" href="/">登录后付款</a></div>
+        </div>
+
+        <div id="payForm" hidden>
+          <label class="pay-label" for="pin">支付 PIN（6 位数字）</label>
+          <input class="pay-pin" id="pin" inputmode="numeric" maxlength="6" autocomplete="off" placeholder="••••••">
+          <div class="pay-actions">
+            <button class="btn" id="cancelBtn" type="button">取消</button>
+            <button class="btn primary" id="payBtn" type="button">确认付款</button>
+          </div>
+          <p class="msg" id="payMsg"></p>
+        </div>
+        <p class="pay-note">这是虚拟资金环境：付款不会产生真实扣款。请核对商户与金额后再确认。</p>
+      </div>
+    </div>
+
+    <div id="resultPane" class="pay-state" hidden>
+      <span class="icon" id="resultIcon">✓</span>
+      <h1 id="resultTitle">付款成功</h1>
+      <p id="resultText"></p>
+      <div class="pay-actions" style="margin-top:22px">
+        <a class="btn" href="/" id="resultHome">返回钱包</a>
+        <a class="btn primary" href="#" id="resultNext" hidden>继续</a>
+      </div>
+    </div>
+  </main>
+
+  <p class="pay-foot">由 SpacePay 提供支付服务 · 虚拟资金，不接入真实银行卡<br>遇到问题请在商户后台提交退款申请</p>
+</div>
+
+<script>
+'use strict';
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const cents = (c) => '$' + String(Math.floor(Math.abs(c) / 100)).replace(/\B(?=(\d{3})+(?!\d))/g, ',') + '.' + String(Math.abs(c) % 100).padStart(2, '0');
+const params = new URLSearchParams(location.search);
+const token = (params.get('token') || '').trim();
+let payment = null;
+let me = null;
+
+async function api(path, opts = {}) {
+  const r = await fetch(path, {
+    method: opts.method || 'GET',
+    headers: { 'Content-Type': 'application/json' },
+    body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
+  });
+  let j = null;
+  try { j = await r.json(); } catch (_) { j = { ok: false, error: '服务返回格式异常' }; }
+  return { status: r.status, ...j };
+}
+function msg(text, isErr) { const e = $('payMsg'); e.textContent = text || ''; e.className = 'msg' + (isErr ? ' err' : ''); }
+
+function showResult(ok, title, text, nextUrl) {
+  $('payPane').hidden = true;
+  $('loading').hidden = true;
+  $('resultPane').hidden = false;
+  $('resultPane').className = 'pay-state ' + (ok ? 'ok' : 'bad');
+  $('resultIcon').textContent = ok ? '✓' : '!';
+  $('resultTitle').textContent = title;
+  $('resultText').textContent = text || '';
+  if (nextUrl) { $('resultNext').href = nextUrl; $('resultNext').hidden = false; $('resultHome').textContent = '留在 SpacePay'; }
+}
+
+function render() {
+  $('loading').hidden = true;
+  if (!payment) { showResult(false, '支付链接无效', '请向商户确认链接是否完整。'); return; }
+  if (payment.status !== 'CREATED') {
+    const map = { SUCCEEDED: ['这笔支付已完成', true], PARTIALLY_REFUNDED: ['这笔支付已部分退款', true], REFUNDED: ['这笔支付已全额退款', true], EXPIRED: ['支付链接已过期', false], CANCELED: ['支付已取消', false], FAILED: ['支付失败', false] };
+    const [title, ok] = map[payment.status] || ['该支付单当前不可支付', false];
+    showResult(ok, title, '如有疑问请联系商户。');
+    return;
+  }
+  $('payPane').hidden = false;
+  $('merchantName').textContent = payment.merchant.name;
+  $('merchantAvatar').textContent = payment.merchant.name.slice(0, 1);
+  $('merchantSite').textContent = payment.merchant.website ? payment.merchant.website.replace(/^https?:\/\//, '') : '商户收款';
+  $('amountText').textContent = cents(payment.amount_cents);
+  $('descText').textContent = payment.description || '';
+  $('refText').textContent = '订单号 ' + payment.reference;
+  if (me) {
+    $('payerText').textContent = me.email;
+    $('payForm').hidden = false;
+    $('pin').focus();
+  } else {
+    $('payerText').textContent = '未登录';
+    $('loginPrompt').hidden = false;
+    $('loginBtn').href = '/?next=' + encodeURIComponent(location.pathname + location.search);
+  }
+}
+
+async function pay() {
+  const pin = $('pin').value.trim();
+  if (!/^\d{6}$/.test(pin)) return msg('请输入 6 位支付 PIN', true);
+  $('payBtn').disabled = true;
+  msg('');
+  const j = await api('/api/checkout/' + encodeURIComponent(token) + '/pay', { method: 'POST', body: { pin } });
+  $('payBtn').disabled = false;
+  if (!j.ok) {
+    if (j.status === 401) { $('payForm').hidden = true; $('loginPrompt').hidden = false; $('loginBtn').href = '/?next=' + encodeURIComponent(location.pathname + location.search); return msg('登录已过期，请重新登录', true); }
+    return msg(j.error || '付款失败', true);
+  }
+  showResult(true, '付款成功', '已向 ' + payment.merchant.name + ' 支付 ' + cents(payment.amount_cents), j.success_url || null);
+  if (j.success_url) setTimeout(() => { location.href = j.success_url; }, 1200);
+}
+
+async function cancel() {
+  $('cancelBtn').disabled = true;
+  const j = await api('/api/checkout/' + encodeURIComponent(token) + '/cancel', { method: 'POST', body: {} });
+  $('cancelBtn').disabled = false;
+  if (!j.ok) return msg(j.error || '取消失败', true);
+  if (j.cancel_url) { location.href = j.cancel_url; return; }
+  showResult(false, '已取消支付', '你可以关闭此页面。');
+}
+
+(async () => {
+  if (!token) { $('loading').hidden = true; showResult(false, '支付链接无效', '缺少支付参数。'); return; }
+  const [view, mine] = await Promise.all([api('/api/checkout/' + encodeURIComponent(token)), api('/api/me')]);
+  if (mine.ok) me = mine.user;
+  if (!view.ok) { $('loading').hidden = true; showResult(false, view.error || '支付链接无效', ''); return; }
+  payment = view.payment;
+  document.title = '付款 ' + cents(payment.amount_cents) + ' · ' + payment.merchant.name;
+  render();
+  $('payBtn').addEventListener('click', pay);
+  $('cancelBtn').addEventListener('click', cancel);
+  $('pin').addEventListener('keydown', (e) => { if (e.key === 'Enter') pay(); });
+})();
+</script>
+</body>
+</html>

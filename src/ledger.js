@@ -123,6 +123,29 @@ function reconcile(db) {
   const wClearing = accountBalance(db, 'clearing:withdrawals');
   if (wClearing !== pendingCents) issues.push({ check: 'clearing_withdrawals_matches_pending', balance_cents: wClearing, pending_cents: pendingCents });
 
+  // 商户：待结算余额 = 成功支付 − 已退款；在途结算 = 待审核提现合计
+  const payableRows = db.prepare("SELECT user_id, SUM(amount_cents) AS s FROM ledger_entries WHERE account = 'merchant:payable' GROUP BY user_id").all();
+  const payableByMerchant = new Map(payableRows.map((r) => [r.user_id, r.s]));
+  const merchants = db.prepare('SELECT id, name FROM merchants').all();
+  let merchantExpected = 0;
+  let merchantPayable = 0;
+  for (const m of merchants) {
+    const bal = payableByMerchant.get(m.id) || 0;
+    merchantPayable += bal;
+    if (bal < 0) issues.push({ check: 'merchant_payable_negative', merchant_id: m.id, merchant_name: m.name, balance_cents: bal });
+    const paid = db.prepare('SELECT amount_cents, refunded_cents, status FROM merchant_payments WHERE merchant_id = ?').all(m.id)
+      .filter((p) => ['SUCCEEDED', 'PARTIALLY_REFUNDED', 'REFUNDED'].includes(p.status));
+    const paidOut = db.prepare("SELECT amount_cents, status FROM merchant_payouts WHERE merchant_id = ? AND status = 'SUCCEEDED'").all(m.id);
+    merchantExpected += paid.reduce((s, p) => s + p.amount_cents - p.refunded_cents, 0) - paidOut.reduce((s, p) => s + p.amount_cents, 0);
+  }
+  const pendingPayouts = db.prepare("SELECT SUM(amount_cents) AS s FROM merchant_payouts WHERE status = 'PENDING'").get();
+  const pendingPayoutCents = (pendingPayouts && pendingPayouts.s) || 0;
+  const payoutClearing = accountBalance(db, 'clearing:merchant_payouts');
+  if (payoutClearing !== pendingPayoutCents) issues.push({ check: 'clearing_merchant_payouts_matches_pending', balance_cents: payoutClearing, pending_cents: pendingPayoutCents });
+  if (merchantPayable + payoutClearing !== merchantExpected) {
+    issues.push({ check: 'merchant_settlement_mismatch', payable_cents: merchantPayable, clearing_cents: payoutClearing, expected_cents: merchantExpected, difference_cents: merchantPayable + payoutClearing - merchantExpected });
+  }
+
   const totalEntries = db.prepare('SELECT COUNT(*) AS c FROM ledger_entries').get().c;
   return {
     ok: issues.length === 0,
@@ -131,7 +154,8 @@ function reconcile(db) {
     entries: totalEntries,
     wallets: wallets.length,
     wallet_total_cents: walletTotal,
-    clearing: { p2p_cents: p2p, withdrawals_in_transit_cents: wClearing },
+    clearing: { p2p_cents: p2p, withdrawals_in_transit_cents: wClearing, merchant_payable_cents: merchantPayable, merchant_in_transit_cents: payoutClearing },
+    merchants: merchants.length,
     issues,
   };
 }

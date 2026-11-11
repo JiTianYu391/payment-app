@@ -10,6 +10,7 @@ const reports = require('./reports');
 const rbac = require('./rbac');
 const state = require('./state');
 const oplog = require('./oplog');
+const notify = require('./notify');
 const { idempotent } = require('./idempotency');
 const { requireConfirmation } = require('./confirm');
 const { AppError, badRequest, notFound, conflict } = require('./errors');
@@ -177,6 +178,24 @@ module.exports = function mountAdmin(app, { db, backend, withTransaction, auth, 
     res.json({ ok: true, items: db.prepare('SELECT * FROM refunds WHERE payment_id = ? ORDER BY id DESC').all(id) });
   });
 
+  // 退款事务：管理员直接退款与退款申请审核共用
+  function performRefund(p, amountCents, reason, operatorId) {
+    const nextStatus = p.refunded_cents + amountCents === p.amount_cents ? 'REFUNDED' : 'PARTIALLY_REFUNDED';
+    state.assertTransition('payment', p.status, nextStatus);
+    return withTransaction(() => {
+      // 乐观锁：仅当已退金额仍等于读取时的值才更新，防止并发退款叠加超额
+      const upd = db.prepare('UPDATE payments SET refunded_cents = refunded_cents + ?, status = ?, updated_at = ? WHERE id = ? AND refunded_cents = ?')
+        .run(amountCents, nextStatus, now(), p.id, p.refunded_cents);
+      if (!upd.changes) throw conflict('CONCURRENT_MODIFICATION', '该支付刚刚被其他人退款，请刷新后重试');
+      const rf = db.prepare('INSERT INTO refunds (payment_id, user_id, amount_cents, reason, status, operator_id, created_at) VALUES (?,?,?,?,?,?,?)')
+        .run(p.id, p.user_id, amountCents, reason, 'SUCCEEDED', operatorId, now());
+      const mv = wallet.applyCash(db, { userId: p.user_id, delta: amountCents, type: 'refund', merchant: p.merchant, category: '退款', description: `${p.merchant} 退款（支付 #${p.id}）：${reason}`, refType: 'refund', refId: rf.lastInsertRowid });
+      db.prepare('UPDATE refunds SET transaction_id = ? WHERE id = ?').run(mv.transactionId, rf.lastInsertRowid);
+      if (p.transaction_id) db.prepare('UPDATE transactions SET status = ? WHERE id = ?').run(nextStatus, p.transaction_id);
+      return { refundId: rf.lastInsertRowid, nextStatus, ...mv };
+    });
+  }
+
   app.post('/api/admin/payments/:id/refunds', auth, requirePerm('refund.create'), idempotent(db, 'refund'), (req, res) => {
     const id = idParam(req);
     const amountCents = v.amount(req.body, 'amount', { label: '退款金额' }); // 零金额 / 负数 / 格式错误在此拒绝
@@ -195,21 +214,59 @@ module.exports = function mountAdmin(app, { db, backend, withTransaction, auth, 
       action: 'refund.create', params: { id, amount_cents: amountCents, reason, refunded_before: p.refunded_cents },
       summary: { title: '确认退款', lines: [['支付编号', `#${p.id}`], ['付款用户', owner.email || '—'], ['商户', p.merchant], ['原支付金额', fmt(p.amount_cents)], ['已退金额', fmt(p.refunded_cents)], ['本次退款', fmt(amountCents)], ['退款后状态', state.LABELS[nextStatus]], ['原因', reason]] },
     })) return;
-    const out = withTransaction(() => {
-      // 乐观锁：仅当已退金额仍等于读取时的值才更新，防止并发退款叠加超额
-      const upd = db.prepare('UPDATE payments SET refunded_cents = refunded_cents + ?, status = ?, updated_at = ? WHERE id = ? AND refunded_cents = ?')
-        .run(amountCents, nextStatus, now(), id, p.refunded_cents);
-      if (!upd.changes) throw conflict('CONCURRENT_MODIFICATION', '该支付刚刚被其他人退款，请刷新后重试');
-      const rf = db.prepare('INSERT INTO refunds (payment_id, user_id, amount_cents, reason, status, operator_id, created_at) VALUES (?,?,?,?,?,?,?)')
-        .run(id, p.user_id, amountCents, reason, 'SUCCEEDED', req.user.id, now());
-      const mv = wallet.applyCash(db, { userId: p.user_id, delta: amountCents, type: 'refund', merchant: p.merchant, category: '退款', description: `${p.merchant} 退款（支付 #${p.id}）：${reason}`, refType: 'refund', refId: rf.lastInsertRowid });
-      db.prepare('UPDATE refunds SET transaction_id = ? WHERE id = ?').run(mv.transactionId, rf.lastInsertRowid);
-      if (p.transaction_id) db.prepare('UPDATE transactions SET status = ? WHERE id = ?').run(nextStatus, p.transaction_id);
-      return { refundId: rf.lastInsertRowid, ...mv };
-    });
+    const out = performRefund(p, amountCents, reason, req.user.id);
     oplog.record(db, req, { action: 'refund.create', target_type: 'payment', target_id: id, amount_cents: amountCents, reason });
-    res.json({ ok: true, message: `已退款 ${fmt(amountCents)}`, refund_id: out.refundId, payment_id: id, payment_status: nextStatus, refunded_cents: p.refunded_cents + amountCents, refundable_cents: remaining - amountCents });
+    notify.notify(db, { userId: p.user_id, kind: 'refund', title: `收到退款 ${fmt(amountCents)}`, body: `${p.merchant}：${reason}`, refType: 'refund', refId: out.refundId, log: req.log });
+    res.json({ ok: true, message: `已退款 ${fmt(amountCents)}`, refund_id: out.refundId, payment_id: id, payment_status: out.nextStatus, refunded_cents: p.refunded_cents + amountCents, refundable_cents: remaining - amountCents });
   });
+
+  // ---------- 用户退款申请审核 ----------
+  app.get('/api/admin/refund-requests', ...read, (req, res) => {
+    const status = req.query.status ? v.oneOf(String(req.query.status), ['PENDING', 'APPROVED', 'REJECTED'], '状态') : '';
+    let rows = db.prepare('SELECT * FROM refund_requests ORDER BY id DESC').all();
+    if (status) rows = rows.filter((r) => r.status === status);
+    const emails = new Map(db.prepare('SELECT id, email FROM users').all().map((u) => [u.id, u.email]));
+    const pays = new Map(db.prepare('SELECT id, merchant, amount_cents, refunded_cents, status FROM payments').all().map((p) => [p.id, p]));
+    res.json({
+      ok: true, filtered_total: rows.length,
+      items: rows.slice(0, 200).map((r) => ({ ...r, user_email: emails.get(r.user_id) || null, payment: pays.get(r.payment_id) || null })),
+    });
+  });
+
+  function reviewRefundRequest(approve) {
+    return (req, res) => {
+      const id = idParam(req);
+      const note = v.str(req.body, 'reason', { max: 200, label: '审核备注' });
+      const r = db.prepare('SELECT * FROM refund_requests WHERE id = ?').get(id);
+      if (!r) throw notFound('REFUND_REQUEST_NOT_FOUND', '退款申请不存在');
+      if (r.status !== 'PENDING') throw conflict('REFUND_REQUEST_DONE', '该申请已处理');
+      const p = db.prepare('SELECT * FROM payments WHERE id = ?').get(r.payment_id);
+      if (!p) throw notFound('PAYMENT_NOT_FOUND', '支付记录不存在');
+      if (r.user_id === req.user.id) throw new AppError(403, 'MAKER_CHECKER', '不能审核自己提交的退款申请');
+      if (approve) {
+        const remaining = p.amount_cents - p.refunded_cents;
+        if (r.amount_cents > remaining) throw badRequest('REFUND_EXCEEDS_REMAINING', `可退余额已变化，当前最多可退 ${fmt(remaining)}`);
+      }
+      if (!requireConfirmation(req, res, {
+        action: approve ? 'refund_request.approve' : 'refund_request.reject', params: { id, note },
+        summary: { title: approve ? '确认批准退款申请' : '确认驳回退款申请', lines: [['申请编号', `#${r.id}`], ['支付编号', `#${p.id}`], ['商户', p.merchant], ['申请金额', fmt(r.amount_cents)], ['原因', r.reason], ['处理', approve ? '批准：资金退回用户钱包' : '驳回：不退款']] },
+      })) return;
+      if (approve) {
+        const out = performRefund(p, r.amount_cents, r.reason || note || '用户退款申请', req.user.id);
+        db.prepare("UPDATE refund_requests SET status = 'APPROVED', reviewed_by = ?, review_note = ?, reviewed_at = ?, refund_id = ? WHERE id = ?")
+          .run(req.user.id, note || null, now(), out.refundId, id);
+        notify.notify(db, { userId: r.user_id, kind: 'refund', title: `退款申请已通过 ${fmt(r.amount_cents)}`, body: note || '', refType: 'refund', refId: out.refundId, log: req.log });
+      } else {
+        db.prepare("UPDATE refund_requests SET status = 'REJECTED', reviewed_by = ?, review_note = ?, reviewed_at = ? WHERE id = ?")
+          .run(req.user.id, note || null, now(), id);
+        notify.push(db, { userId: r.user_id, kind: 'refund', title: '退款申请未通过', body: note || '如有疑问请联系客服', refType: 'refund_request', refId: id });
+      }
+      oplog.record(db, req, { action: approve ? 'refund_request.approve' : 'refund_request.reject', target_type: 'refund_request', target_id: id, amount_cents: r.amount_cents, reason: note || null });
+      res.json({ ok: true, message: approve ? '已批准并退款' : '已驳回退款申请', refund_request_id: id, status: approve ? 'APPROVED' : 'REJECTED' });
+    };
+  }
+  app.post('/api/admin/refund-requests/:id/approve', auth, requirePerm('refund_request.review'), reviewRefundRequest(true));
+  app.post('/api/admin/refund-requests/:id/reject', auth, requirePerm('refund_request.review'), reviewRefundRequest(false));
 
   // ---------- 提现审核 ----------
   app.get('/api/admin/withdrawals', ...read, (req, res) => {
@@ -257,6 +314,11 @@ module.exports = function mountAdmin(app, { db, backend, withTransaction, auth, 
         }
       });
       oplog.record(db, req, { action, target_type: 'withdrawal', target_id: id, amount_cents: w.amount_cents, reason });
+      notify.notify(db, {
+        userId: w.user_id, kind: 'withdrawal',
+        title: approve ? `提现已出款 ${fmt(w.amount_cents)}` : `提现被驳回 ${fmt(w.amount_cents)}`,
+        body: reason || (approve ? '资金已出款' : '资金已退回钱包'), refType: 'withdrawal', refId: id, log: req.log,
+      });
       res.json({ ok: true, message: approve ? '已批准提现' : '已驳回提现，资金已退回用户钱包', withdrawal_id: id, status: to });
     };
   }

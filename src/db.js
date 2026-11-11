@@ -51,17 +51,26 @@ const forceJson = process.env.DB_BACKEND === 'json' || /\.json$/i.test(dbPath);
 const SCHEMA_TABLES = ['users', 'verification_codes', 'demo_inbox', 'sessions', 'wallets', 'transactions', 'audit_logs',
   'products', 'price_snapshots', 'holdings', 'holding_lots', 'orders', 'portfolio_snapshots', 'dividends', 'watchlist', 'alerts', 'goals', 'fixed_deposits', 'risk_targets',
   // SpacePay 新增：复式账本、支付/退款/提现、幂等键、操作日志
-  'ledger_entries', 'payments', 'refunds', 'withdrawals', 'idempotency_keys', 'operation_logs'];
+  'ledger_entries', 'payments', 'refunds', 'withdrawals', 'idempotency_keys', 'operation_logs',
+  // 安全与体验：二次确认令牌、站内通知、退款申请
+  'confirm_tokens', 'notifications', 'refund_requests',
+  // 商户开放平台
+  'merchants', 'merchant_keys', 'merchant_payments', 'merchant_refunds', 'merchant_payouts', 'webhook_deliveries', 'api_logs'];
 // 有自增 id 的表；wallets 的主键是 user_id，没有 id 列
 const AUTO_ID_TABLES = new Set(['users', 'verification_codes', 'demo_inbox', 'sessions', 'transactions', 'audit_logs',
   'price_snapshots', 'holding_lots', 'orders', 'portfolio_snapshots', 'dividends', 'alerts', 'goals', 'fixed_deposits',
-  'ledger_entries', 'payments', 'refunds', 'withdrawals', 'idempotency_keys', 'operation_logs']);
+  'ledger_entries', 'payments', 'refunds', 'withdrawals', 'idempotency_keys', 'operation_logs',
+  'confirm_tokens', 'notifications', 'refund_requests',
+  'merchants', 'merchant_keys', 'merchant_payments', 'merchant_refunds', 'merchant_payouts', 'webhook_deliveries', 'api_logs']);
 // SQLite 建表语句里的列默认值（与原版 src/db.js 的 CREATE TABLE 一致）。
 // JSON 后端插入时未指定的列要补上这些默认值，否则 `used = 0` 这类查询会查不到行。
 const COLUMN_DEFAULTS = {
   users: { pin_salt: null, pin_hash: null, failed_login_attempts: 0, locked_until: null, risk_level: null, risk_score: null,
-    role: 'customer', status: 'ACTIVE', frozen_reason: null, frozen_at: null },
+    role: 'customer', status: 'ACTIVE', frozen_reason: null, frozen_at: null,
+    pin_failed_attempts: 0, pin_locked_until: null, totp_secret: null, totp_enabled: 0, totp_recovery_json: null,
+    last_login_at: null, closed_at: null },
   verification_codes: { attempts: 0, used: 0 },
+  sessions: { ip: null, user_agent: null, last_seen_at: null },
   wallets: { balance_cents: 0 },
   transactions: { product_id: null, order_id: null, counterparty_email: null, merchant: null, category: null,
     sim_day: null, status: 'SUCCEEDED', ref_type: null, ref_id: null },
@@ -83,6 +92,18 @@ const COLUMN_DEFAULTS = {
   withdrawals: { status: 'PENDING', reviewed_by: null, review_note: null, reviewed_at: null, transaction_id: null },
   idempotency_keys: { status_code: null, response_json: null },
   operation_logs: { actor_id: null, actor_email: null, actor_role: null, target_type: null, target_id: null, amount_cents: null, reason: null, request_id: null, ip: null },
+  confirm_tokens: { used_at: null },
+  notifications: { read_at: null, ref_type: null, ref_id: null },
+  refund_requests: { status: 'PENDING', reviewed_by: null, review_note: null, reviewed_at: null, refund_id: null },
+  merchants: { owner_user_id: null, status: 'ACTIVE', website: null, description: null, webhook_url: null, webhook_secret: null },
+  merchant_keys: { label: null, mode: 'live', last_used_at: null, revoked_at: null },
+  merchant_payments: { refunded_cents: 0, status: 'CREATED', currency: 'USD', customer_email: null, customer_user_id: null,
+    description: null, metadata_json: null, checkout_token: null, paid_at: null, transaction_id: null,
+    success_url: null, cancel_url: null },
+  merchant_refunds: { reason: null, status: 'SUCCEEDED' },
+  merchant_payouts: { status: 'PENDING', destination: null, reviewed_by: null, review_note: null, reviewed_at: null },
+  webhook_deliveries: { attempts: 0, status: 'PENDING', last_status_code: null, last_error: null, next_attempt_at: null, delivered_at: null },
+  api_logs: { key_id: null, request_id: null, ip: null, duration_ms: null },
 };
 function applyDefaults(table, row) {
   const defs = COLUMN_DEFAULTS[table];
@@ -303,6 +324,14 @@ CREATE INDEX IF NOT EXISTS idx_session_token ON sessions(token_hash);
     "ALTER TABLE users ADD COLUMN status TEXT NOT NULL DEFAULT 'ACTIVE'",
     'ALTER TABLE users ADD COLUMN frozen_reason TEXT',
     'ALTER TABLE users ADD COLUMN frozen_at INTEGER',
+    'ALTER TABLE users ADD COLUMN pin_failed_attempts INTEGER NOT NULL DEFAULT 0',
+    'ALTER TABLE users ADD COLUMN pin_locked_until INTEGER',
+    'ALTER TABLE users ADD COLUMN totp_secret TEXT',
+    'ALTER TABLE users ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 0',
+    'ALTER TABLE users ADD COLUMN totp_recovery_json TEXT',
+    'ALTER TABLE users ADD COLUMN last_login_at INTEGER',
+    'ALTER TABLE users ADD COLUMN closed_at INTEGER',
+    'ALTER TABLE sessions ADD COLUMN last_seen_at INTEGER',
     'ALTER TABLE transactions ADD COLUMN sim_day INTEGER',
     "ALTER TABLE transactions ADD COLUMN status TEXT NOT NULL DEFAULT 'SUCCEEDED'",
     'ALTER TABLE transactions ADD COLUMN ref_type TEXT',
@@ -398,6 +427,149 @@ CREATE INDEX IF NOT EXISTS idx_withdrawals_status ON withdrawals(status, created
 CREATE INDEX IF NOT EXISTS idx_oplog_created ON operation_logs(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_tx_created ON transactions(created_at DESC);
 `);
+  // 安全、通知与商户开放平台
+  db.exec(`
+CREATE TABLE IF NOT EXISTS confirm_tokens (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  action TEXT NOT NULL,
+  params_hash TEXT NOT NULL,
+  nonce TEXT NOT NULL UNIQUE,
+  expires_at INTEGER NOT NULL,
+  used_at INTEGER,
+  created_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS notifications (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL,
+  title TEXT NOT NULL,
+  body TEXT,
+  ref_type TEXT,
+  ref_id INTEGER,
+  read_at INTEGER,
+  created_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS refund_requests (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  payment_id INTEGER NOT NULL REFERENCES payments(id),
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  amount_cents INTEGER NOT NULL CHECK (amount_cents > 0),
+  reason TEXT,
+  status TEXT NOT NULL DEFAULT 'PENDING',
+  reviewed_by INTEGER,
+  review_note TEXT,
+  reviewed_at INTEGER,
+  refund_id INTEGER,
+  created_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS merchants (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  email TEXT UNIQUE NOT NULL,
+  owner_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  status TEXT NOT NULL DEFAULT 'ACTIVE',
+  website TEXT,
+  description TEXT,
+  webhook_url TEXT,
+  webhook_secret TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS merchant_keys (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  merchant_id INTEGER NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
+  key_id TEXT NOT NULL UNIQUE,
+  secret_hash TEXT NOT NULL,
+  label TEXT,
+  mode TEXT NOT NULL DEFAULT 'live',
+  last_used_at INTEGER,
+  revoked_at INTEGER,
+  created_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS merchant_payments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  merchant_id INTEGER NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
+  reference TEXT NOT NULL,
+  amount_cents INTEGER NOT NULL CHECK (amount_cents > 0),
+  currency TEXT NOT NULL DEFAULT 'USD',
+  status TEXT NOT NULL DEFAULT 'CREATED',
+  customer_email TEXT,
+  customer_user_id INTEGER,
+  description TEXT,
+  metadata_json TEXT,
+  success_url TEXT,
+  cancel_url TEXT,
+  checkout_token TEXT UNIQUE,
+  refunded_cents INTEGER NOT NULL DEFAULT 0 CHECK (refunded_cents >= 0 AND refunded_cents <= amount_cents),
+  transaction_id INTEGER,
+  created_at INTEGER NOT NULL,
+  paid_at INTEGER,
+  updated_at INTEGER NOT NULL,
+  UNIQUE(merchant_id, reference)
+);
+CREATE TABLE IF NOT EXISTS merchant_refunds (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  payment_id INTEGER NOT NULL REFERENCES merchant_payments(id),
+  merchant_id INTEGER NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
+  amount_cents INTEGER NOT NULL CHECK (amount_cents > 0),
+  reason TEXT,
+  status TEXT NOT NULL DEFAULT 'SUCCEEDED',
+  transaction_id INTEGER,
+  created_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS merchant_payouts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  merchant_id INTEGER NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
+  amount_cents INTEGER NOT NULL CHECK (amount_cents > 0),
+  status TEXT NOT NULL DEFAULT 'PENDING',
+  destination TEXT,
+  requested_by INTEGER,
+  reviewed_by INTEGER,
+  review_note TEXT,
+  reviewed_at INTEGER,
+  created_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS webhook_deliveries (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  merchant_id INTEGER NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
+  event_id TEXT NOT NULL,
+  event_type TEXT NOT NULL,
+  payment_id INTEGER,
+  url TEXT NOT NULL,
+  payload_json TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'PENDING',
+  attempts INTEGER NOT NULL DEFAULT 0,
+  last_status_code INTEGER,
+  last_error TEXT,
+  next_attempt_at INTEGER,
+  created_at INTEGER NOT NULL,
+  delivered_at INTEGER
+);
+CREATE TABLE IF NOT EXISTS api_logs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  merchant_id INTEGER,
+  key_id TEXT,
+  method TEXT,
+  path TEXT,
+  status_code INTEGER,
+  request_id TEXT,
+  ip TEXT,
+  duration_ms INTEGER,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_confirm_nonce ON confirm_tokens(nonce);
+CREATE INDEX IF NOT EXISTS idx_confirm_expire ON confirm_tokens(expires_at);
+CREATE INDEX IF NOT EXISTS idx_notification_user ON notifications(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_refund_req_status ON refund_requests(status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_merchant_key ON merchant_keys(key_id);
+CREATE INDEX IF NOT EXISTS idx_mpay_merchant ON merchant_payments(merchant_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_mpay_checkout ON merchant_payments(checkout_token);
+CREATE INDEX IF NOT EXISTS idx_mpay_ref ON merchant_payments(merchant_id, reference);
+CREATE INDEX IF NOT EXISTS idx_mpayout_merchant ON merchant_payouts(merchant_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_webhook_status ON webhook_deliveries(status, next_attempt_at);
+CREATE INDEX IF NOT EXISTS idx_apilog_merchant ON api_logs(merchant_id, created_at DESC);
+`);
   // 支持嵌套调用：已在事务中时直接执行（由最外层负责提交/回滚）。
   // 写锁冲突（SQLITE_BUSY，多进程共享同一库文件时可能出现）时整体回滚后退避重试。
   let depth = 0;
@@ -455,7 +627,12 @@ function createJsonBackend() {
       const parsed = JSON.parse(raw);
       if (parsed && parsed.tables) {
         store = parsed;
-        // 旧文件里的行也补上列默认值（防止历史数据缺少字段）
+        // 旧文件里的行也补上列默认值（防止历史数据缺少字段）；新增的表补空表
+        for (const t of SCHEMA_TABLES) {
+          if (!Array.isArray(store.tables[t])) store.tables[t] = [];
+          if (!store.seq) store.seq = {};
+          if (store.seq[t] === undefined) store.seq[t] = 1;
+        }
         for (const t of SCHEMA_TABLES) {
           if (Array.isArray(store.tables[t])) store.tables[t].forEach((row) => applyDefaults(t, row));
         }

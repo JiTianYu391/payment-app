@@ -1,14 +1,15 @@
-// 关键操作二次确认（退款、冻结、提现申请与审核）。
+// 关键操作二次确认（退款、冻结、提现申请与审核、付款、商户提现）。
 // 第一次请求不带 confirm_token：服务端不执行，返回 428 + 操作摘要 + 一次性 confirm_token（5 分钟有效）。
 // 前端展示摘要让操作人确认，第二次请求带上 confirm_token 才执行。
-// 令牌用 HMAC 绑定（操作人, 动作, 参数摘要），参数被改动或换人使用都会校验失败；用过即作废。
+// 令牌用 HMAC 绑定（操作人, 动作, 参数摘要）；nonce 落库并以条件更新原子消费：
+// 进程重启、多实例部署或重复提交都不能重放同一个令牌。
 'use strict';
 
 const crypto = require('crypto');
+const { db } = require('./db');
 
 const TTL_MS = 5 * 60 * 1000;
 const SECRET = process.env.CONFIRM_SECRET || process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
-const used = new Map(); // nonce -> 过期时间
 
 function digest(params) {
   return crypto.createHash('sha256').update(JSON.stringify(params || {})).digest('hex').slice(0, 32);
@@ -21,7 +22,11 @@ function sign(payload) {
 }
 
 function issue(actorId, action, params) {
-  return sign({ a: action, u: actorId, h: digest(params), n: crypto.randomBytes(8).toString('hex'), exp: Date.now() + TTL_MS });
+  const nonce = crypto.randomBytes(16).toString('hex');
+  const exp = Date.now() + TTL_MS;
+  db.prepare('INSERT INTO confirm_tokens (user_id, action, params_hash, nonce, expires_at, created_at) VALUES (?,?,?,?,?,?)')
+    .run(actorId, action, digest(params), nonce, exp, Date.now());
+  return sign({ a: action, u: actorId, h: digest(params), n: nonce, exp });
 }
 
 function verify(token, actorId, action, params) {
@@ -33,10 +38,16 @@ function verify(token, actorId, action, params) {
   try { p = JSON.parse(Buffer.from(body, 'base64url').toString('utf8')); } catch (_) { return { ok: false, reason: 'format' }; }
   if (p.exp < Date.now()) return { ok: false, reason: 'expired' };
   if (p.a !== action || p.u !== actorId || p.h !== digest(params)) return { ok: false, reason: 'mismatch' };
-  if (used.has(p.n)) return { ok: false, reason: 'used' };
-  used.set(p.n, p.exp);
-  if (used.size > 5000) for (const [n, exp] of used) if (exp < Date.now()) used.delete(n);
+  const row = db.prepare('SELECT id, used_at, expires_at FROM confirm_tokens WHERE nonce = ?').get(p.n);
+  if (!row || row.expires_at < Date.now()) return { ok: false, reason: 'expired' };
+  // 原子消费：并发两个相同请求只有一个能把 used_at 从 NULL 改掉
+  const r = db.prepare('UPDATE confirm_tokens SET used_at = ? WHERE nonce = ? AND used_at IS NULL').run(Date.now(), p.n);
+  if (!r.changes) return { ok: false, reason: 'used' };
   return { ok: true };
+}
+
+function purgeExpired() {
+  return db.prepare('DELETE FROM confirm_tokens WHERE expires_at < ?').run(Date.now() - TTL_MS).changes;
 }
 
 const REASONS = { missing: '', signature: '确认凭证无效', format: '确认凭证无效', expired: '确认已超时，请重新确认', mismatch: '操作内容已变化，请重新确认', used: '该确认已使用，请重新发起' };
@@ -60,4 +71,4 @@ function requireConfirmation(req, res, { action, params, summary }) {
   return false;
 }
 
-module.exports = { issue, verify, requireConfirmation, TTL_MS };
+module.exports = { issue, verify, requireConfirmation, purgeExpired, TTL_MS };

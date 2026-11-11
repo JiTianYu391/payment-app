@@ -16,12 +16,20 @@ const PERMISSIONS = {
   'reconcile.run': '运行对账',
   'user.freeze': '冻结 / 解冻账户',
   'user.role': '调整用户角色',
+  'refund_request.review': '审核用户退款申请',
+  'merchant.manage': '审批商户入驻与暂停',
+  'merchant.payout.review': '审核商户结算提现',
+  'merchant.read': '查看商户后台',
+  'merchant.write': '管理商户资料、密钥与 Webhook',
+  'merchant.refund': '发起商户退款',
+  'merchant.payout': '申请结算提现',
 };
 
 const ROLES = {
   customer: { label: '用户', perms: [] },
+  merchant: { label: '商户', perms: ['merchant.read', 'merchant.write', 'merchant.refund', 'merchant.payout'] },
   viewer: { label: '只读访客', perms: ['console.read'] },
-  finance: { label: '财务', perms: ['console.read', 'tx.export', 'refund.create', 'withdrawal.review', 'reconcile.run'] },
+  finance: { label: '财务', perms: ['console.read', 'tx.export', 'refund.create', 'withdrawal.review', 'reconcile.run', 'refund_request.review', 'merchant.payout.review'] },
   admin: { label: '管理员', perms: Object.keys(PERMISSIONS) },
 };
 

@@ -1,7 +1,7 @@
 {
   "name": "SpacePay",
   "short_name": "SpacePay",
-  "description": "SpacePay 支付与资金管理（演示环境：虚拟资金）",
+  "description": "SpacePay 支付与资金管理（虚拟资金）",
   "lang": "zh-CN",
   "id": "/",
   "start_url": "/?source=pwa",

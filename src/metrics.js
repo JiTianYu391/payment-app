@@ -5,7 +5,7 @@
 const TX_TYPES = {
   bonus: '体验金', topup: '充值', transfer_in: '转入', transfer_out: '转出', pay: '付款', refund: '退款',
   withdrawal: '提现', withdrawal_reversal: '提现退回', BUY: '买入', SELL: '卖出', FD_REDEEM: '定存兑付',
-  DIVIDEND: '分红', INTEREST: '利息', demo_reset: '演示重置',
+  DIVIDEND: '分红', INTEREST: '利息', demo_reset: '数据重置',
 };
 
 // 交易状态（语义化徽标用）

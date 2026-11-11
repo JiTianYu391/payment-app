@@ -202,7 +202,7 @@ module.exports = function mountInvest(app, ctx) {
       unrealized_pl_cents: unrealized, realized_pl_cents: realized,
       allocation: allocArr, allocation_sum_pct: allocSum,
       holdings_top: holdings.slice(0, 5),
-      notice: '模拟演示：虚拟资金与模拟价格，不涉及真实交易。',
+      notice: '模拟市场：虚拟资金与模拟价格，不涉及真实交易。',
     });
   });
 
@@ -245,7 +245,7 @@ module.exports = function mountInvest(app, ctx) {
     // 风险提示：产品风险高于用户测评等级
     let riskWarning = null;
     if (req.user.risk_level && RISK_ORDER[p.risk] > RISK_ORDER[LEVEL_MAX_RISK[req.user.risk_level]]) {
-      riskWarning = `该产品风险等级 ${p.risk}（${p.riskLabel}），高于您的测评等级 ${req.user.risk_level}（${RISK_ZH[req.user.risk_level]}，上限 ${LEVEL_MAX_RISK[req.user.risk_level]}）。本提示仅为教学演示，不构成适当性评估。`;
+      riskWarning = `该产品风险等级 ${p.risk}（${p.riskLabel}），高于您的测评等级 ${req.user.risk_level}（${RISK_ZH[req.user.risk_level]}，上限 ${LEVEL_MAX_RISK[req.user.risk_level]}）。本提示仅为风险提示，不构成适当性评估。`;
     } else if (!req.user.risk_level) {
       riskWarning = '您尚未完成风险测评（教育自测，非适当性评估）。建议先在投资页完成测评。';
     }
@@ -474,10 +474,10 @@ module.exports = function mountInvest(app, ctx) {
       income: {
         dividends_cents: divRows.reduce((s, r) => s + r.amount_cents, 0),
         interest_cents: intRows.reduce((s, r) => s + r.amount_cents, 0),
-        note: '分红与利息与价格收益分开列示；本演示为现金分红/付息，无红利再投（DRIP）。',
+        note: '分红与利息与价格收益分开列示；本系统为现金分红/付息，无红利再投（DRIP）。',
       },
       helm_example: '示例（Helm）：先涨 +5% 再跌 −20%，TWR 恒为 −16%。若 $10,000 在期初投入，MWR 也是 −16%；若在中点（大跌前）才投入，MWR 为 −24%——同一组投资，只因投入时点不同，个人回报差 8 个百分点。',
-      note: '收益数字为模拟演示，不代表真实收益；原始余额变化（含体验金/充值）不是回报率。',
+      note: '收益数字按模拟价格计算，不代表真实收益；原始余额变化（含体验金/充值）不是回报率。',
     });
   });
 
@@ -683,7 +683,7 @@ module.exports = function mountInvest(app, ctx) {
       items: rows.map((g) => ({
         ...g, current_cents: v.total_cents,
         progress_pct: g.target_cents ? Math.min(100, (v.total_cents / g.target_cents) * 100) : 0,
-        projection_note: '按模拟年化 5% 测算的达成时间仅为教学演示，不是承诺。',
+        projection_note: '按模拟年化 5% 测算的达成时间仅为测算示例，不是承诺。',
       })),
     });
   });
@@ -703,7 +703,7 @@ module.exports = function mountInvest(app, ctx) {
     res.json({ ok: true });
   });
 
-  // ---------- 备份 / 导出 / 演示重置 ----------
+  // ---------- 备份 / 导出 / 账户数据重置 ----------
   app.get('/api/backup/export', auth, (req, res) => {
     const data = {
       exported_at: new Date().toISOString(), user: req.user.email,
@@ -748,19 +748,19 @@ module.exports = function mountInvest(app, ctx) {
     if (!sec.verifyPassword(password, row.password_salt, row.password_hash)) return res.status(403).json({ ok: false, error: '登录密码不正确' });
     const BONUS = parseInt(process.env.WELCOME_BONUS_CENTS || '5000', 10);
     const pendingW = db.prepare("SELECT COUNT(*) AS c FROM withdrawals WHERE user_id = ? AND status = 'PENDING'").get(req.user.id).c;
-    if (pendingW) return res.status(409).json({ ok: false, code: 'PENDING_WITHDRAWAL', error: '有待审核的提现申请，审核完成后才能重置演示', request_id: req.id });
+    if (pendingW) return res.status(409).json({ ok: false, code: 'PENDING_WITHDRAWAL', error: '有待审核的提现申请，审核完成后才能重置账户数据', request_id: req.id });
     withTransaction(() => {
-      // 账本只追加不删除：先用冲正分录把钱包清零，再发放体验金；其余演示历史（含流水明细）按原逻辑清空
+      // 账本只追加不删除：先用冲正分录把钱包清零，再发放体验金；其余历史（含流水明细）按原逻辑清空
       for (const t of ['transactions', 'holding_lots', 'orders', 'holdings', 'portfolio_snapshots', 'dividends', 'watchlist', 'alerts', 'goals', 'fixed_deposits']) { // holding_lots 引用 orders，必须先删
         db.prepare(`DELETE FROM ${t} WHERE user_id = ?`).run(req.user.id);
       }
       const current = cashOf(req.user.id);
-      if (current !== 0) wallet.applyCash(db, { userId: req.user.id, delta: -current, type: 'demo_reset', allowNegative: true, category: '演示重置', description: '演示重置：清空余额' });
-      if (BONUS > 0) wallet.applyCash(db, { userId: req.user.id, delta: BONUS, type: 'bonus', category: '体验金', description: `演示重置：恢复体验金 $${fmtC(BONUS)}（虚拟资金）` });
+      if (current !== 0) wallet.applyCash(db, { userId: req.user.id, delta: -current, type: 'demo_reset', allowNegative: true, category: '数据重置', description: '数据重置：清空余额' });
+      if (BONUS > 0) wallet.applyCash(db, { userId: req.user.id, delta: BONUS, type: 'bonus', category: '体验金', description: `账户数据重置：恢复体验金 $${fmtC(BONUS)}（虚拟资金）` });
       prod.backfillCashHistory(db, req.user.id, BONUS);
     });
-    audit(req.user.id, req.user.email, 'demo_reset', '演示重置，恢复 $50 体验金', '');
-    res.json({ ok: true, message: `演示已重置，恢复体验金 $${fmtC(BONUS)}`, balance_cents: BONUS });
+    audit(req.user.id, req.user.email, 'demo_reset', '账户数据重置，恢复 $50 体验金', '');
+    res.json({ ok: true, message: `账户数据已重置，恢复体验金 $${fmtC(BONUS)}`, balance_cents: BONUS });
   });
 
   // 供 server.js /api/health 使用

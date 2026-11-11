@@ -2,6 +2,42 @@
 
 日期：2026-11-07。分支：`claude/spacepay-system-upgrade-z2ugnt`。
 
+## 0. v4（2026-11-11）：安全加固与商户开放平台
+
+### 安全
+
+| 项 | 改动 |
+| --- | --- |
+| 验证码 | `Math.random` → `crypto.randomInt` |
+| 支付 PIN | 连续失败 5 次锁定 15 分钟（`pin_failed_attempts` / `pin_locked_until`），锁定期间正确的 PIN 也拒绝 |
+| 找回密码 | 新增 `POST /api/auth/reset-password`：邮箱验证码 + 新密码，成功后注销全部会话、清除登录锁定 |
+| 会话 | 登录同时下发 httpOnly + SameSite=Lax 会话 cookie（按请求协议自动加 Secure），前端不再把令牌写入 localStorage，只保留内存副本；新增会话列表、单条注销、注销其他设备；过期会话启动时与每小时清理 |
+| 两步验证 | TOTP（RFC 6238，SHA-1 / 6 位 / 30 秒），10 个一次性恢复码；开启与关闭都需要登录密码 |
+| 二次确认 | nonce 从内存 Map 改为 `confirm_tokens` 表；条件更新原子消费，重启或多实例不能重放 |
+| 请求头 | 启用严格 CSP（同源自包含资源、禁止插件 / 内嵌 / base 劫持）；CORS 改为显式白名单，不再反射任意 Origin |
+| 邮件 | 支持 SMTP（QQ 邮箱授权码、Gmail、企业邮箱）；配置真实通道后应用内收件箱自动关闭 |
+| 账户 | 新增注销账户（余额必须为 0、无待审核提现；状态置为 CLOSED，账本保留） |
+| 提现 | 新增 24 小时 / 30 天的笔数与金额限额，用户可撤销待审核提现 |
+| 退款 | 新增用户退款申请 → 财务审核（`refund_requests`），与后台直接退款共用同一退款事务 |
+
+### 商户开放平台
+
+- 数据：`merchants`、`merchant_keys`、`merchant_payments`、`merchant_refunds`、`merchant_payouts`、`webhook_deliveries`、`api_logs`、`notifications`。
+- 密钥：`sp_live_<key_id>_<secret>`，只保存 secret 的 SHA-256，可吊销；每个 Key 每分钟限流。
+- 接口：创建 / 查询 / 列表 / 退款 / 余额 / 结算；`Idempotency-Key` 与 `reference` 双重去重。
+- 结账：`/pay.html?token=…`，付款人登录 + 支付 PIN 完成付款；指定 `customer_email` 时其他账户不能付款。
+- Webhook：`X-SpacePay-Signature: t=…,v1=HMAC-SHA256(secret, t + "." + rawBody)`；1 分钟 / 5 分钟 / 30 分钟 / 2 小时 / 6 小时重试，最多 6 次；后台可手动重投。地址要求 HTTPS 且禁止内网（`WEBHOOK_ALLOW_HTTP=true` 仅用于本地联调）。
+- 账务：付款人钱包 → `merchant:payable` → 申请结算转入 `clearing:merchant_payouts` → 审核出款；驳回原路退回。
+- 对账新增：商户待结算不能为负；待结算 + 在途结算 = 成功支付 − 退款 − 已出款；在途结算 = 待审核结算合计。
+- 新增页面：`/merchant` 商户后台、`/developers` 开放平台文档、`/pay` 结账页；运营后台新增商户、退款申请、商户结算三个页面。
+
+### 运维与文案
+
+- 新增 `/metrics` Prometheus 指标（可用 `METRICS_TOKEN` 保护）。
+- `scripts/backup.js` 备份后校验 `integrity_check`、钱包与账本合计、journal 借贷平衡，失败退出码 2；`backup.sh` 对 SQLite 改调该脚本。
+- 移除界面与接口文案中的「演示环境」表述，保留并强化「虚拟资金」说明。
+- 测试：新增商户全流程（含 Webhook 签名）、安全与账户流程、TOTP / API Key 单元测试，双后端运行。
+
 ## 1. 改了什么、为什么
 
 | 方面 | 改动 | 原因 |

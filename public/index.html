@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>SpacePay</title>
-<meta name="description" content="SpacePay 支付与资金管理（演示环境）">
+<meta name="description" content="SpacePay 支付与资金管理：钱包、转账、商户付款、结算与投资模拟（虚拟资金）">
 <meta name="theme-color" content="#FFFFFF" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#141920" media="(prefers-color-scheme: dark)">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -18,7 +18,7 @@
 <script>try { var t = localStorage.getItem('spacepay_theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}</script>
 </head>
 <body>
-<div class="env-bar" role="note">演示环境 · 虚拟资金 · 模拟价格 · 提现为模拟出款</div>
+<div class="env-bar" role="note">虚拟资金 · 模拟价格 · 提现为模拟出款</div>
 <div class="net-bar" id="netBar" role="status" hidden><i data-icon="wifi-off" data-size="16"></i>网络已断开，恢复后自动刷新</div>
 
 <header class="topbar">
@@ -30,6 +30,9 @@
   </a>
   <div class="top-meta" id="topMeta" hidden>
     <span id="simDay" class="sim-day hide-sm" title="模拟市场每 10 分钟推进 1 个模拟日"></span>
+    <button class="icon-btn notif-btn" id="notifBtn" onclick="openNotifications()" aria-label="通知">
+      <i data-icon="bell" data-size="18"></i><span class="notif-dot" id="notifDot" hidden></span>
+    </button>
     <button class="user-chip" onclick="showView('settings')" aria-label="我的账户">
       <span class="avatar" id="avatar" aria-hidden="true"></span>
       <span class="user-meta hide-sm"><b id="topName"></b><span id="topEmail"></span></span>
@@ -47,11 +50,13 @@
     <div class="tabs" role="tablist">
       <button id="tabLogin" class="tab active" role="tab" onclick="showTab('login')">登录</button>
       <button id="tabRegister" class="tab" role="tab" onclick="showTab('register')">注册</button>
+      <button id="tabReset" class="tab" role="tab" onclick="showTab('reset')">找回密码</button>
     </div>
     <div class="card-body">
       <form id="loginPane" onsubmit="event.preventDefault(); doLogin()">
         <label class="field"><span>邮箱</span><input id="loginEmail" type="email" autocomplete="email" inputmode="email" required></label>
         <label class="field"><span>密码</span><input id="loginPassword" type="password" autocomplete="current-password" required><small>连续输错 5 次，账户锁定 15 分钟。</small></label>
+        <label class="field" id="loginTotpField" hidden><span>两步验证码</span><input id="loginTotp" inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="6 位动态码"><small id="loginTotpHint">打开身份验证器 App，或输入一个恢复码。</small></label>
         <button class="btn primary btn-full">登录</button>
       </form>
       <form id="registerPane" hidden onsubmit="event.preventDefault(); doRegister()">
@@ -64,6 +69,16 @@
         <label class="field"><span>昵称</span><input id="regNickname" maxlength="30" autocomplete="nickname" required></label>
         <label class="field"><span>密码</span><input id="regPassword" type="password" autocomplete="new-password" minlength="8" required><small>至少 8 位。</small></label>
         <button class="btn primary btn-full">注册并领取体验金</button>
+      </form>
+      <form id="resetPane" hidden onsubmit="event.preventDefault(); doResetPassword()">
+        <label class="field"><span>注册邮箱</span><input id="resetEmail" type="email" autocomplete="email" inputmode="email" required></label>
+        <label class="field"><span>验证码</span>
+          <span class="code-row"><input id="resetCodeInput" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="6 位数字"><button type="button" class="btn" onclick="requestResetCode()">获取验证码</button></span>
+          <small>10 分钟内有效；重置成功后所有设备会退出登录。</small>
+        </label>
+        <div id="resetInbox" class="inbox" hidden></div>
+        <label class="field"><span>新密码</span><input id="resetPassword" type="password" autocomplete="new-password" minlength="8" required><small>至少 8 位。</small></label>
+        <button class="btn primary btn-full">重置密码</button>
       </form>
       <p id="authMsg" class="msg" role="status"></p>
     </div>
@@ -84,6 +99,9 @@
       <button class="nav-item" data-view="c-overview" onclick="showView('c-overview')"><i data-icon="layout-dashboard"></i>概览</button>
       <button class="nav-item" data-view="c-tx" onclick="showView('c-tx')"><i data-icon="receipt"></i>交易</button>
       <button class="nav-item" data-view="c-payments" onclick="showView('c-payments')"><i data-icon="credit-card"></i>支付与退款</button>
+      <button class="nav-item" data-view="c-refunds" onclick="showView('c-refunds')"><i data-icon="undo-2"></i>退款申请</button>
+      <button class="nav-item" data-view="c-merchants" onclick="showView('c-merchants')"><i data-icon="shopping-bag"></i>商户</button>
+      <button class="nav-item" data-view="c-payouts" onclick="showView('c-payouts')"><i data-icon="banknote"></i>商户结算</button>
       <button class="nav-item" data-view="c-withdrawals" onclick="showView('c-withdrawals')"><i data-icon="landmark"></i>提现审核</button>
       <button class="nav-item" data-view="c-users" onclick="showView('c-users')"><i data-icon="users"></i>用户</button>
       <button class="nav-item" data-view="c-recon" onclick="showView('c-recon')"><i data-icon="scale"></i>对账</button>
@@ -161,8 +179,8 @@
           <button class="tab" data-tab="orders" onclick="activityTab('orders')">投资订单</button>
         </div>
         <div id="pane-all"><div id="meTx"></div></div>
-        <div id="pane-pay" hidden><div class="table-wrap"><table class="data stack"><thead><tr><th>时间</th><th>商户</th><th>分类</th><th>状态</th><th class="num">金额</th><th class="num">已退款</th></tr></thead><tbody id="myPayments"></tbody></table></div></div>
-        <div id="pane-wd" hidden><div class="table-wrap"><table class="data stack"><thead><tr><th>时间</th><th>收款账户</th><th>状态</th><th>审核备注</th><th class="num">金额</th></tr></thead><tbody id="myWithdrawals"></tbody></table></div></div>
+        <div id="pane-pay" hidden><div class="table-wrap"><table class="data stack"><thead><tr><th>时间</th><th>商户</th><th>分类</th><th>状态</th><th class="num">金额</th><th class="num">已退款</th><th class="act"></th></tr></thead><tbody id="myPayments"></tbody></table></div></div>
+        <div id="pane-wd" hidden><div class="table-wrap"><table class="data stack"><thead><tr><th>时间</th><th>收款账户</th><th>状态</th><th>审核备注</th><th class="num">金额</th><th class="act"></th></tr></thead><tbody id="myWithdrawals"></tbody></table></div></div>
         <div id="pane-orders" hidden><div class="table-wrap"><table class="data stack"><thead><tr><th>产品</th><th>时间</th><th>方向</th><th class="num">数量（份）</th><th class="num">成交价</th><th class="num">成交额</th><th class="num">已实现盈亏</th><th>状态</th></tr></thead><tbody id="orderBody"></tbody></table></div></div>
       </div>
     </section>
@@ -219,7 +237,15 @@
         <ul class="list">
           <li><button class="list-row" onclick="openPinSheet()"><span class="row-icon"><i data-icon="key-round" data-size="18"></i></span><span class="row-main"><span class="row-title">支付 PIN</span><span class="row-sub">转账、付款、提现和下单时验证</span></span><span class="row-value" id="pinStatus">—</span><i data-icon="chevron-right" data-size="18" class="row-chevron"></i></button></li>
           <li><button class="list-row" onclick="openSheet('pwSheet')"><span class="row-icon"><i data-icon="lock-keyhole" data-size="18"></i></span><span class="row-main"><span class="row-title">登录密码</span><span class="row-sub">修改后其他设备会退出登录</span></span><span class="row-value">修改</span><i data-icon="chevron-right" data-size="18" class="row-chevron"></i></button></li>
+          <li><button class="list-row" onclick="openTotp()"><span class="row-icon"><i data-icon="shield-check" data-size="18"></i></span><span class="row-main"><span class="row-title">两步验证</span><span class="row-sub">登录时要求身份验证器动态码</span></span><span class="row-value" id="totpStatus">—</span><i data-icon="chevron-right" data-size="18" class="row-chevron"></i></button></li>
+          <li><button class="list-row" onclick="openSessions()"><span class="row-icon"><i data-icon="monitor" data-size="18"></i></span><span class="row-main"><span class="row-title">登录设备</span><span class="row-sub">查看并注销其他设备</span></span><span class="row-value" id="sessionStatus">—</span><i data-icon="chevron-right" data-size="18" class="row-chevron"></i></button></li>
           <li><button class="list-row" onclick="openAudit()"><span class="row-icon"><i data-icon="history" data-size="18"></i></span><span class="row-main"><span class="row-title">安全日志</span><span class="row-sub" id="auditSub">登录、资金与安全设置记录</span></span><span class="row-value">最近 50 条</span><i data-icon="chevron-right" data-size="18" class="row-chevron"></i></button></li>
+        </ul>
+
+        <h2 class="group-title">商户与开放平台</h2>
+        <ul class="list">
+          <li><a class="list-row" href="/merchant"><span class="row-icon"><i data-icon="shopping-bag" data-size="18"></i></span><span class="row-main"><span class="row-title">商户后台</span><span class="row-sub">创建 API 密钥、查看支付与结算</span></span><span class="row-value" id="merchantStatus">—</span><i data-icon="chevron-right" data-size="18" class="row-chevron"></i></a></li>
+          <li><a class="list-row" href="/developers"><span class="row-icon"><i data-icon="file-text" data-size="18"></i></span><span class="row-main"><span class="row-title">开发者文档</span><span class="row-sub">支付、退款、Webhook 接入说明</span></span><i data-icon="chevron-right" data-size="18" class="row-chevron"></i></a></li>
         </ul>
 
         <h2 class="group-title">偏好</h2>
@@ -237,16 +263,17 @@
 
         <h2 class="group-title">关于</h2>
         <ul class="list">
-          <li><button class="list-row" onclick="openSheet('aboutSheet')"><span class="row-icon"><i data-icon="info" data-size="18"></i></span><span class="row-main"><span class="row-title">演示环境说明</span></span><i data-icon="chevron-right" data-size="18" class="row-chevron"></i></button></li>
+          <li><button class="list-row" onclick="openSheet('aboutSheet')"><span class="row-icon"><i data-icon="info" data-size="18"></i></span><span class="row-main"><span class="row-title">关于 SpacePay</span></span><i data-icon="chevron-right" data-size="18" class="row-chevron"></i></button></li>
         </ul>
 
         <h2 class="group-title">危险操作</h2>
         <ul class="list danger">
-          <li><button class="list-row danger" onclick="openSheet('resetSheet')"><span class="row-icon danger"><i data-icon="rotate-ccw" data-size="18"></i></span><span class="row-main"><span class="row-title">重置演示数据</span><span class="row-sub">清空交易、持仓与订单，余额恢复为 $50.00</span></span><i data-icon="chevron-right" data-size="18" class="row-chevron"></i></button></li>
+          <li><button class="list-row danger" onclick="openSheet('resetSheet')"><span class="row-icon danger"><i data-icon="rotate-ccw" data-size="18"></i></span><span class="row-main"><span class="row-title">重置账户数据</span><span class="row-sub">清空交易、持仓与订单，余额恢复为 $50.00</span></span><i data-icon="chevron-right" data-size="18" class="row-chevron"></i></button></li>
+          <li><button class="list-row danger" onclick="openSheet('closeSheet')"><span class="row-icon danger"><i data-icon="ban" data-size="18"></i></span><span class="row-main"><span class="row-title">注销账户</span><span class="row-sub">不可撤销；余额需先转出或提现</span></span><i data-icon="chevron-right" data-size="18" class="row-chevron"></i></button></li>
         </ul>
 
         <button class="logout-btn" onclick="doLogout()"><i data-icon="log-out" data-size="18"></i>退出登录</button>
-        <p class="app-version">SpacePay 3.1 · 演示环境</p>
+        <p class="app-version">SpacePay 4.0 · 虚拟资金</p>
       </div>
     </section>
 
@@ -285,6 +312,46 @@
         </div></form>
         <div class="table-wrap"><table class="data stack"><thead><tr><th>编号</th><th>时间</th><th>用户</th><th>商户</th><th>状态</th><th class="num">支付金额</th><th class="num">已退款</th><th class="num">可退</th><th class="act"></th></tr></thead><tbody id="cpBody"></tbody></table></div>
         <div class="pager" id="cpPager"></div>
+      </div>
+    </section>
+
+    <section id="view-c-merchants" class="view" hidden>
+      <div class="page-head"><div><h1>商户</h1><p>入驻审核与收款资格；暂停后商户不能创建支付、收款或结算</p></div></div>
+      <div class="card">
+        <div class="tabs" role="tablist" id="cmTabs">
+          <button class="tab" data-s="" onclick="setMerchantStatus('')">全部</button>
+          <button class="tab active" data-s="PENDING" onclick="setMerchantStatus('PENDING')">待审核</button>
+          <button class="tab" data-s="ACTIVE" onclick="setMerchantStatus('ACTIVE')">正常</button>
+          <button class="tab" data-s="SUSPENDED" onclick="setMerchantStatus('SUSPENDED')">已暂停</button>
+          <button class="tab" data-s="REJECTED" onclick="setMerchantStatus('REJECTED')">已拒绝</button>
+        </div>
+        <div class="table-wrap"><table class="data stack"><thead><tr><th>编号</th><th>商户</th><th>邮箱</th><th>状态</th><th class="num">可结算</th><th class="num">结算中</th><th class="act"></th></tr></thead><tbody id="cmBody"></tbody></table></div>
+      </div>
+    </section>
+
+    <section id="view-c-refunds" class="view" hidden>
+      <div class="page-head"><div><h1>退款申请</h1><p>用户对付款发起的退款申请；审核通过后资金退回用户钱包</p></div></div>
+      <div class="card">
+        <div class="tabs" role="tablist" id="crTabs">
+          <button class="tab active" data-s="PENDING" onclick="setRefundReqStatus('PENDING')">待审核</button>
+          <button class="tab" data-s="APPROVED" onclick="setRefundReqStatus('APPROVED')">已通过</button>
+          <button class="tab" data-s="REJECTED" onclick="setRefundReqStatus('REJECTED')">已驳回</button>
+          <button class="tab" data-s="" onclick="setRefundReqStatus('')">全部</button>
+        </div>
+        <div class="table-wrap"><table class="data stack"><thead><tr><th>编号</th><th>时间</th><th>用户</th><th>商户</th><th>原因</th><th class="num">金额</th><th>状态</th><th class="act"></th></tr></thead><tbody id="crBody"></tbody></table></div>
+      </div>
+    </section>
+
+    <section id="view-c-payouts" class="view" hidden>
+      <div class="page-head"><div><h1>商户结算</h1><p>批准后资金出款；驳回后退回商户可结算余额</p></div></div>
+      <div class="card">
+        <div class="tabs" role="tablist" id="cpoTabs">
+          <button class="tab active" data-s="PENDING" onclick="setMerchantPayoutStatus('PENDING')">待审核</button>
+          <button class="tab" data-s="SUCCEEDED" onclick="setMerchantPayoutStatus('SUCCEEDED')">已出款</button>
+          <button class="tab" data-s="FAILED" onclick="setMerchantPayoutStatus('FAILED')">已驳回</button>
+          <button class="tab" data-s="" onclick="setMerchantPayoutStatus('')">全部</button>
+        </div>
+        <div class="table-wrap"><table class="data stack"><thead><tr><th>编号</th><th>时间</th><th>商户</th><th>收款账户</th><th class="num">金额</th><th>状态</th><th class="act"></th></tr></thead><tbody id="cpoBody"></tbody></table></div>
       </div>
     </section>
 
@@ -484,22 +551,107 @@
 
 <div id="aboutSheet" class="modal" hidden><div class="modal-card">
   <div class="sheet-handle"></div>
-  <div class="modal-head"><h2>演示环境说明</h2><button type="button" class="close" onclick="closeModal('aboutSheet')" aria-label="关闭"><i data-icon="x" data-size="18"></i></button></div>
+  <div class="modal-head"><h2>关于 SpacePay</h2><button type="button" class="close" onclick="closeModal('aboutSheet')" aria-label="关闭"><i data-icon="x" data-size="18"></i></button></div>
   <div class="modal-body">
-    <p class="sheet-intro">SpacePay 演示环境中的余额、持仓、价格与盈亏均为模拟数据，没有现金价值。平台不接收、不持有真实资金，不向任何市场发送订单，提现不会到达真实银行账户。本应用不提供投资、税务或法律建议。</p>
-    <dl class="kv"><dt>版本</dt><dd>SpacePay 3.1</dd><dt>资金</dt><dd>虚拟资金（USD）</dd><dt>行情</dt><dd>模拟价格，每 10 分钟推进 1 个模拟日</dd></dl>
+    <p class="sheet-intro">SpacePay 账户中的余额、持仓、价格与盈亏均为虚拟资金与模拟数据，没有现金价值。平台不接收、不持有真实资金，不向任何市场发送订单，提现不会到达真实银行账户。本应用不提供投资、税务或法律建议。</p>
+    <dl class="kv"><dt>版本</dt><dd>SpacePay 4.0</dd><dt>资金</dt><dd>虚拟资金（USD）</dd><dt>行情</dt><dd>模拟价格，每 10 分钟推进 1 个模拟日</dd><dt>商户接口</dt><dd><a href="/developers">开放平台文档</a></dd></dl>
   </div>
 </div></div>
 
 <div id="resetSheet" class="modal" hidden><form class="modal-card" onsubmit="event.preventDefault(); resetDemo()">
   <div class="sheet-handle"></div>
-  <div class="modal-head"><div><h2>重置演示数据</h2><p class="hint">此操作不可撤销</p></div><button type="button" class="close" onclick="closeModal('resetSheet')" aria-label="关闭"><i data-icon="x" data-size="18"></i></button></div>
+  <div class="modal-head"><div><h2>重置账户数据</h2><p class="hint">此操作不可撤销</p></div><button type="button" class="close" onclick="closeModal('resetSheet')" aria-label="关闭"><i data-icon="x" data-size="18"></i></button></div>
   <div class="modal-body">
     <p class="notice" style="margin-bottom:var(--space-4)"><i data-icon="circle-alert" data-size="18"></i><span>将清空本账户的交易、持仓与订单，余额恢复为 $50.00。账本会保留冲正记录用于对账。</span></p>
     <label class="field"><span>输入登录密码确认</span><span class="pw-wrap"><input id="resetPw" type="password" autocomplete="current-password"><button type="button" class="pw-toggle" data-for="resetPw">显示</button></span></label>
     <p class="msg" id="resetMsg"></p>
   </div>
   <div class="modal-foot"><button type="button" class="btn" onclick="closeModal('resetSheet')">取消</button><button class="btn danger solid">重置</button></div>
+</form></div>
+
+<div id="closeSheet" class="modal" hidden><form class="modal-card" onsubmit="event.preventDefault(); closeAccount()">
+  <div class="sheet-handle"></div>
+  <div class="modal-head"><div><h2>注销账户</h2><p class="hint">不可撤销</p></div><button type="button" class="close" onclick="closeModal('closeSheet')" aria-label="关闭"><i data-icon="x" data-size="18"></i></button></div>
+  <div class="modal-body">
+    <p class="notice" style="margin-bottom:var(--space-4)"><i data-icon="circle-alert" data-size="18"></i><span>注销后无法登录，所有设备立即退出。余额必须为 0，且不能有待审核的提现。交易与账本记录按审计要求保留。</span></p>
+    <label class="field"><span>登录密码</span><span class="pw-wrap"><input id="closePw" type="password" autocomplete="current-password"><button type="button" class="pw-toggle" data-for="closePw">显示</button></span></label>
+    <p class="msg" id="closeMsg"></p>
+  </div>
+  <div class="modal-foot"><button type="button" class="btn" onclick="closeModal('closeSheet')">取消</button><button class="btn danger solid">继续注销</button></div>
+</form></div>
+
+<div id="sessionsSheet" class="modal" hidden><div class="modal-card wide">
+  <div class="sheet-handle"></div>
+  <div class="modal-head"><div><h2>登录设备</h2><p class="hint">发现不是本人的设备，请立即注销并修改密码</p></div><button type="button" class="close" onclick="closeModal('sessionsSheet')" aria-label="关闭"><i data-icon="x" data-size="18"></i></button></div>
+  <div class="modal-body">
+    <ul class="feed" id="sessionsList"></ul>
+    <div class="modal-foot" style="padding:var(--space-3) 0 0;border:0;justify-content:space-between">
+      <button class="btn sm danger" onclick="revokeOtherSessions()">注销其他所有设备</button>
+      <button class="btn sm" onclick="closeModal('sessionsSheet')">关闭</button>
+    </div>
+    <p class="msg" id="sessionsMsg"></p>
+  </div>
+</div></div>
+
+<div id="totpSheet" class="modal" hidden><div class="modal-card">
+  <div class="sheet-handle"></div>
+  <div class="modal-head"><div><h2 id="totpTitle">两步验证</h2><p class="hint">使用 Google Authenticator、1Password 等验证器</p></div><button type="button" class="close" onclick="closeModal('totpSheet')" aria-label="关闭"><i data-icon="x" data-size="18"></i></button></div>
+  <div id="totpSetup" hidden>
+    <form class="modal-body" onsubmit="event.preventDefault(); startTotp()">
+      <p class="sheet-intro">开启后，登录时除密码外还需要输入验证器中的 6 位动态码。</p>
+      <label class="field"><span>登录密码</span><span class="pw-wrap"><input id="totpPw" type="password" autocomplete="current-password"><button type="button" class="pw-toggle" data-for="totpPw">显示</button></span></label>
+      <p class="msg" id="totpPwMsg"></p>
+      <div class="modal-foot" style="padding:var(--space-3) 0 0;border:0;justify-content:flex-end"><button class="btn primary">生成密钥</button></div>
+    </form>
+  </div>
+  <div id="totpConfirm" hidden>
+    <form class="modal-body" onsubmit="event.preventDefault(); enableTotp()">
+      <p class="sheet-intro">在验证器中手动添加以下密钥（时间基准 TOTP，6 位，30 秒）：</p>
+      <div class="code-box mono" id="totpSecret"></div>
+      <p class="hint" style="margin-bottom:var(--space-3);word-break:break-all" id="totpUri"></p>
+      <label class="field"><span>验证器中的 6 位动态码</span><input id="totpCode" inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="••••••"></label>
+      <p class="msg" id="totpMsg"></p>
+      <div class="modal-foot" style="padding:var(--space-3) 0 0;border:0;justify-content:flex-end"><button class="btn primary">开启两步验证</button></div>
+    </form>
+  </div>
+  <div id="totpRecovery" hidden>
+    <div class="modal-body">
+      <p class="notice ok" style="margin-bottom:var(--space-3)"><i data-icon="circle-check" data-size="18"></i><span>两步验证已开启。以下恢复码只显示这一次，请离线保存；每个只能用一次。</span></p>
+      <div class="code-box mono" id="totpCodes" style="white-space:pre-line"></div>
+      <div class="modal-foot" style="padding:var(--space-3) 0 0;border:0;justify-content:flex-end"><button class="btn primary" onclick="closeModal('totpSheet'); loadSettings()">我已保存</button></div>
+    </div>
+  </div>
+  <form id="totpDisable" hidden class="modal-body" onsubmit="event.preventDefault(); disableTotp()">
+    <p class="sheet-intro">关闭后登录只需密码。请输入登录密码以及动态码或一个恢复码。</p>
+    <label class="field"><span>登录密码</span><span class="pw-wrap"><input id="totpOffPw" type="password" autocomplete="current-password"><button type="button" class="pw-toggle" data-for="totpOffPw">显示</button></span></label>
+    <label class="field"><span>动态码或恢复码</span><input id="totpOffCode" autocomplete="one-time-code" placeholder="6 位动态码或 xxxx-xxxx"></label>
+    <p class="msg" id="totpOffMsg"></p>
+    <div class="modal-foot" style="padding:var(--space-3) 0 0;border:0;justify-content:flex-end"><button class="btn danger solid">关闭两步验证</button></div>
+  </form>
+</div></div>
+
+<div id="notifSheet" class="modal" hidden><div class="modal-card wide">
+  <div class="sheet-handle"></div>
+  <div class="modal-head"><div><h2>通知</h2><p class="hint">交易、审核结果与安全提醒</p></div><button type="button" class="close" onclick="closeModal('notifSheet')" aria-label="关闭"><i data-icon="x" data-size="18"></i></button></div>
+  <div class="modal-body">
+    <ul class="feed" id="notifList"></ul>
+    <div class="modal-foot" style="padding:var(--space-3) 0 0;border:0;justify-content:space-between">
+      <button class="btn sm ghost" onclick="markAllRead()">全部标为已读</button>
+      <button class="btn sm" onclick="closeModal('notifSheet')">关闭</button>
+    </div>
+  </div>
+</div></div>
+
+<div id="refundSheet" class="modal" hidden><form class="modal-card" onsubmit="event.preventDefault(); submitRefundRequest()">
+  <div class="sheet-handle"></div>
+  <div class="modal-head"><div><h2>申请退款</h2><p class="hint">提交后由财务审核，通过后资金退回钱包</p></div><button type="button" class="close" onclick="closeModal('refundSheet')" aria-label="关闭"><i data-icon="x" data-size="18"></i></button></div>
+  <div class="modal-body">
+    <dl class="kv" id="refundInfo" style="margin-bottom:var(--space-3)"></dl>
+    <label class="field"><span>退款金额（USD）</span><input id="rfReqAmount" inputmode="decimal"></label>
+    <label class="field"><span>退款原因</span><textarea id="rfReqReason" rows="2" maxlength="200" placeholder="例如：未收到商品"></textarea></label>
+    <p class="msg" id="rfReqMsg"></p>
+  </div>
+  <div class="modal-foot"><button type="button" class="btn" onclick="closeModal('refundSheet')">取消</button><button class="btn primary">提交申请</button></div>
 </form></div>
 
 <!-- ============ 投资弹窗 ============ -->

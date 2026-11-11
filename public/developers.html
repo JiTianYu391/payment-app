@@ -1,0 +1,327 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SpacePay 开发者</title>
+<meta name="description" content="SpacePay 商户开放平台：创建支付、查询、退款、结算与 Webhook 接入文档。">
+<meta name="theme-color" content="#FFFFFF" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#141920" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="/brand/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/styles.css">
+<script>try { var t = localStorage.getItem('spacepay_theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}</script>
+<style>
+  .docs-top { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; justify-content: space-between; gap: 16px; height: 60px; padding: 0 24px; background: var(--surface); border-bottom: 1px solid var(--border); }
+  .docs-top .brand img { height: 22px; }
+  .docs-top nav { display: flex; gap: 8px; align-items: center; }
+  .docs-wrap { display: grid; grid-template-columns: 232px minmax(0, 1fr); max-width: 1180px; margin: 0 auto; gap: 40px; padding: 32px 24px 80px; }
+  .docs-nav { position: sticky; top: 84px; align-self: start; display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
+  .docs-nav a { display: block; padding: 7px 10px; border-radius: 6px; color: var(--text-2); }
+  .docs-nav a:hover { background: var(--surface-2); color: var(--text-1); }
+  .docs-nav .grp { margin: 14px 0 4px; padding: 0 10px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--text-3); }
+  .docs-main { min-width: 0; }
+  .docs-main h1 { font-size: 30px; margin-bottom: 8px; letter-spacing: -.02em; }
+  .docs-main h2 { font-size: 20px; margin: 44px 0 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+  .docs-main h3 { font-size: 15px; margin: 26px 0 8px; }
+  .docs-main p { color: var(--text-2); margin: 0 0 12px; line-height: 1.75; }
+  .docs-main ul, .docs-main ol { color: var(--text-2); margin: 0 0 14px; padding-left: 22px; line-height: 1.8; }
+  .lede { font-size: 16px; color: var(--text-2); max-width: 720px; }
+  .note { display: flex; gap: 10px; padding: 12px 14px; border-radius: 10px; background: var(--brand-soft); color: var(--text-1); font-size: 13px; line-height: 1.7; margin: 16px 0; border: 1px solid color-mix(in srgb, var(--brand) 18%, transparent); }
+  .note.warn { background: var(--warning-bg); border-color: color-mix(in srgb, var(--warning) 25%, transparent); }
+  .code { position: relative; margin: 12px 0 20px; border: 1px solid var(--border); border-radius: 10px; background: #0E1726; overflow: hidden; }
+  .code .code-head { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; background: rgba(255,255,255,.04); border-bottom: 1px solid rgba(255,255,255,.08); color: #9AA6B8; font-size: 12px; }
+  .code pre { margin: 0; padding: 14px 16px; overflow: auto; color: #D9E1EE; font: 12.5px/1.65 var(--font-mono); }
+  .code .copy { border: 1px solid rgba(255,255,255,.14); background: transparent; color: #C7D2E0; border-radius: 6px; height: 24px; padding: 0 8px; font-size: 11px; cursor: pointer; }
+  .code .copy:hover { background: rgba(255,255,255,.08); }
+  .kv-table { width: 100%; border-collapse: collapse; font-size: 13px; margin: 10px 0 20px; }
+  .kv-table th, .kv-table td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  .kv-table th { color: var(--text-3); font-weight: 500; background: var(--surface-2); }
+  .kv-table td code, p code, li code { font: 12.5px var(--font-mono); background: var(--surface-3); border-radius: 4px; padding: 1px 5px; }
+  .method { display: inline-block; min-width: 48px; text-align: center; padding: 2px 6px; border-radius: 5px; font: 600 11px var(--font-mono); margin-right: 6px; }
+  .method.get { background: var(--brand-soft); color: var(--brand); }
+  .method.post { background: var(--success-bg); color: var(--success); }
+  .endpoint { font: 13px var(--font-mono); padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); margin: 10px 0; overflow-wrap: anywhere; }
+  .step { display: grid; grid-template-columns: 28px 1fr; gap: 12px; margin: 14px 0; align-items: start; }
+  .step > b:first-child { display: inline-flex; width: 24px; height: 24px; align-items: center; justify-content: center; border-radius: 50%; background: var(--brand); color: #fff; font-size: 12px; margin-top: 2px; }
+  .step div > b { font-weight: 600; }
+  .footer-cta { margin-top: 48px; padding: 24px; border-radius: 14px; background: var(--surface); box-shadow: var(--shadow-card); display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+  @media (max-width: 860px) {
+    .docs-wrap { grid-template-columns: 1fr; padding-top: 20px; }
+    .docs-nav { position: static; flex-direction: row; flex-wrap: wrap; border-bottom: 1px solid var(--border); padding-bottom: 14px; }
+    .docs-nav .grp { display: none; }
+    .docs-top { padding: 0 16px; }
+  }
+</style>
+</head>
+<body>
+<header class="docs-top">
+  <a class="brand" href="/" aria-label="SpacePay 首页"><picture><source srcset="/brand/spacepay-logo-dark.svg" media="(prefers-color-scheme: dark)"><img src="/brand/spacepay-logo-light.svg" alt="SpacePay"></picture></a>
+  <nav>
+    <a class="btn sm ghost" href="/merchant">商户后台</a>
+    <a class="btn sm" href="/">打开钱包</a>
+  </nav>
+</header>
+
+<div class="docs-wrap">
+  <aside class="docs-nav">
+    <div class="grp">开始</div>
+    <a href="#intro">概览</a>
+    <a href="#quickstart">快速开始</a>
+    <a href="#auth">鉴权</a>
+    <div class="grp">接口</div>
+    <a href="#create">创建支付</a>
+    <a href="#retrieve">查询支付</a>
+    <a href="#list">支付列表</a>
+    <a href="#refund">退款</a>
+    <a href="#balance">结算余额</a>
+    <a href="#payouts">结算提现</a>
+    <div class="grp">事件</div>
+    <a href="#webhooks">Webhook</a>
+    <a href="#signature">签名校验</a>
+    <a href="#checkout">结账流程</a>
+    <div class="grp">参考</div>
+    <a href="#errors">错误码</a>
+    <a href="#limits">限流与幂等</a>
+  </aside>
+
+  <main class="docs-main">
+    <h1 id="intro">SpacePay 开放平台</h1>
+    <p class="lede">用一套简洁的 HTTP API 接收付款、发起退款并接收实时事件。所有金额以整数分存储，接口返回同时给出小数金额。</p>
+
+    <div class="note warn">
+      <span>本环境的余额为<b>虚拟资金</b>，不接入真实银行卡或支付渠道，结算出款为模拟流程。接口行为、签名与幂等语义与生产实现一致，可用于完整联调。</span>
+    </div>
+
+    <table class="kv-table">
+      <tbody>
+        <tr><th style="width:160px">接口地址</th><td><code id="baseUrl"></code></td></tr>
+        <tr><th>鉴权方式</th><td><code>Authorization: Bearer sp_live_…</code> 或 <code>X-API-Key</code></td></tr>
+        <tr><th>数据格式</th><td>JSON（<code>Content-Type: application/json</code>），UTF-8</td></tr>
+        <tr><th>金额</th><td>字段 <code>amount</code> 使用十进制字符串（如 <code>"12.34"</code>）；返回同时包含 <code>amount_cents</code></td></tr>
+        <tr><th>时间</th><td>毫秒时间戳（UNIX epoch, ms）</td></tr>
+      </tbody>
+    </table>
+
+    <h2 id="quickstart">快速开始</h2>
+    <div class="step"><b>1</b><div><b>开户</b>：在 <a href="/merchant">商户后台</a> 提交入驻申请，审核通过后账户角色变为商户。</div></div>
+    <div class="step"><b>2</b><div><b>创建密钥</b>：在商户后台「API 密钥」中创建 <code>sp_live_…</code>。密钥只在创建时显示一次，服务端只保存哈希。</div></div>
+    <div class="step"><b>3</b><div><b>发起支付</b>：调用创建支付接口，把返回的 <code>checkout_url</code> 交给付款人；付款完成会收到 <code>payment.succeeded</code> Webhook。</div></div>
+
+    <h2 id="auth">鉴权</h2>
+    <p>所有 <code>/api/v1/*</code> 请求都需要 API Key。密钥由 <code>sp_live_</code>、<code>sp_test_</code> 前缀、Key ID 与 Secret 组成；Secret 只在创建时返回一次，之后无法再次读取。</p>
+    <div class="code"><div class="code-head"><span>curl</span><button class="copy">复制</button></div><pre>curl https://your-domain/api/v1/balance \
+  -H "Authorization: Bearer sp_live_xxxxxxxxxxxxxxxx_yyyyyyyyyyyyyyyyyyyyyyyy"</pre></div>
+    <p>也可以使用 <code>X-API-Key</code> 请求头。请把密钥保存在服务端环境变量中，不要放进浏览器、移动端或 Git 仓库。怀疑泄露时在商户后台立即吊销并重新创建。</p>
+
+    <h2 id="create">创建支付</h2>
+    <div class="endpoint"><span class="method post">POST</span>/api/v1/payments</div>
+    <table class="kv-table">
+      <thead><tr><th>参数</th><th>类型</th><th>说明</th></tr></thead>
+      <tbody>
+        <tr><td><code>amount</code></td><td>string</td><td>必填。金额，如 <code>"12.34"</code>，最多 2 位小数，必须大于 0</td></tr>
+        <tr><td><code>currency</code></td><td>string</td><td>可选，默认 <code>USD</code></td></tr>
+        <tr><td><code>reference</code></td><td>string</td><td>你的订单号，同一商户内唯一；重复使用且金额相同会返回同一支付单</td></tr>
+        <tr><td><code>description</code></td><td>string</td><td>商品或服务描述，付款人可见</td></tr>
+        <tr><td><code>customer_email</code></td><td>string</td><td>限定付款人；设置后其他账户不能支付该单</td></tr>
+        <tr><td><code>metadata</code></td><td>object</td><td>自定义键值，序列化后不超过 2KB</td></tr>
+        <tr><td><code>success_url</code></td><td>string</td><td>支付成功后跳转地址</td></tr>
+        <tr><td><code>cancel_url</code></td><td>string</td><td>付款人取消后跳转地址</td></tr>
+      </tbody>
+    </table>
+    <div class="code"><div class="code-head"><span>请求</span><button class="copy">复制</button></div><pre>curl -X POST https://your-domain/api/v1/payments \
+  -H "Authorization: Bearer $SPACEPAY_KEY" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: 6f1c2a9e-3b7d-4c55-9a10-2f8e7d6c5b4a" \
+  -d '{
+    "amount": "12.34",
+    "reference": "order-2026-0001",
+    "description": "拿铁两杯",
+    "metadata": { "sku": "latte" },
+    "success_url": "https://shop.example/paid"
+  }'</pre></div>
+    <div class="code"><div class="code-head"><span>响应 201</span><button class="copy">复制</button></div><pre>{
+  "ok": true,
+  "payment": {
+    "id": "pay_1",
+    "numeric_id": 1,
+    "reference": "order-2026-0001",
+    "amount_cents": 1234,
+    "amount": "12.34",
+    "currency": "USD",
+    "status": "CREATED",
+    "refunded_cents": 0,
+    "refundable_cents": 1234,
+    "description": "拿铁两杯",
+    "customer_email": null,
+    "metadata": { "sku": "latte" },
+    "checkout_url": "https://your-domain/pay.html?token=…",
+    "created_at": 1762800000000,
+    "expires_at": 1762801800000
+  }
+}</pre></div>
+    <p>支付单 30 分钟内有效。把 <code>checkout_url</code> 交给付款人，或由你的页面直接跳转过去。</p>
+
+    <h3>状态</h3>
+    <table class="kv-table">
+      <thead><tr><th>状态</th><th>含义</th></tr></thead>
+      <tbody>
+        <tr><td><code>CREATED</code></td><td>待支付</td></tr>
+        <tr><td><code>SUCCEEDED</code></td><td>付款成功</td></tr>
+        <tr><td><code>PARTIALLY_REFUNDED</code></td><td>部分退款</td></tr>
+        <tr><td><code>REFUNDED</code></td><td>已全额退款</td></tr>
+        <tr><td><code>FAILED</code> / <code>CANCELED</code> / <code>EXPIRED</code></td><td>失败 / 已取消 / 已过期</td></tr>
+      </tbody>
+    </table>
+
+    <h2 id="retrieve">查询支付</h2>
+    <div class="endpoint"><span class="method get">GET</span>/api/v1/payments/:id</div>
+    <p><code>:id</code> 接受 <code>pay_1</code> 或 <code>1</code>。响应包含该支付单的全部退款记录。</p>
+
+    <h2 id="list">支付列表</h2>
+    <div class="endpoint"><span class="method get">GET</span>/api/v1/payments?limit=20&amp;starting_after=pay_100&amp;status=SUCCEEDED</div>
+    <p>按创建时间倒序返回。使用 <code>next_starting_after</code> 翻页，<code>limit</code> 最大 100。</p>
+
+    <h2 id="refund">退款</h2>
+    <div class="endpoint"><span class="method post">POST</span>/api/v1/payments/:id/refund</div>
+    <table class="kv-table">
+      <thead><tr><th>参数</th><th>类型</th><th>说明</th></tr></thead>
+      <tbody>
+        <tr><td><code>amount</code></td><td>string</td><td>可选，默认退剩余全部；不能超过可退金额</td></tr>
+        <tr><td><code>reason</code></td><td>string</td><td>退款原因，付款人可见</td></tr>
+      </tbody>
+    </table>
+    <div class="code"><div class="code-head"><span>curl</span><button class="copy">复制</button></div><pre>curl -X POST https://your-domain/api/v1/payments/pay_1/refund \
+  -H "Authorization: Bearer $SPACEPAY_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"amount":"2.34","reason":"部分退单"}'</pre></div>
+    <p>退款从商户可结算余额退回付款人钱包；余额不足时返回 <code>INSUFFICIENT_MERCHANT_BALANCE</code>。</p>
+
+    <h2 id="balance">结算余额</h2>
+    <div class="endpoint"><span class="method get">GET</span>/api/v1/balance</div>
+    <div class="code"><div class="code-head"><span>响应</span><button class="copy">复制</button></div><pre>{
+  "ok": true,
+  "balance": {
+    "available_cents": 1000,
+    "available": "10.00",
+    "pending_payout_cents": 0,
+    "pending_payout": "0.00",
+    "currency": "USD"
+  }
+}</pre></div>
+    <p>可用余额 = 成功支付 − 已退款 − 已出款 − 正在审核的结算提现。</p>
+
+    <h2 id="payouts">结算提现</h2>
+    <div class="endpoint"><span class="method post">POST</span>/api/v1/payouts</div>
+    <div class="endpoint"><span class="method get">GET</span>/api/v1/payouts</div>
+    <p>申请把可用余额提现到指定账户，需财务审核后出款。请求体：<code>{"amount":"100.00","destination":"账户信息"}</code>。</p>
+
+    <h2 id="webhooks">Webhook</h2>
+    <p>在商户后台填写 HTTPS 回调地址后，以下事件会以 <code>POST</code> 方式推送。每个请求体都是完整事件对象。</p>
+    <table class="kv-table">
+      <thead><tr><th>事件</th><th>触发时机</th></tr></thead>
+      <tbody>
+        <tr><td><code>payment.succeeded</code></td><td>付款人完成支付</td></tr>
+        <tr><td><code>payment.refunded</code></td><td>商户或运营发起退款后</td></tr>
+      </tbody>
+    </table>
+    <div class="code"><div class="code-head"><span>事件体</span><button class="copy">复制</button></div><pre>{
+  "id": "evt_9f8e7d6c5b4a3210",
+  "type": "payment.succeeded",
+  "created": 1762800000,
+  "data": {
+    "id": "pay_1",
+    "reference": "order-2026-0001",
+    "amount_cents": 1234,
+    "status": "SUCCEEDED",
+    "metadata": { "sku": "latte" }
+  }
+}</pre></div>
+    <p>请求头：</p>
+    <table class="kv-table">
+      <tbody>
+        <tr><th style="width:230px"><code>X-SpacePay-Event</code></th><td>事件类型</td></tr>
+        <tr><th><code>X-SpacePay-Delivery</code></th><td>事件 ID，重试时保持不变，可用于去重</td></tr>
+        <tr><th><code>X-SpacePay-Signature</code></th><td><code>t=时间戳,v1=签名</code></td></tr>
+      </tbody>
+    </table>
+    <p>你的服务端应在 10 秒内返回 2xx。非 2xx 或超时会按 1 分钟、5 分钟、30 分钟、2 小时、6 小时 重试，共 6 次；最终失败可在商户后台手动重投。务必以 <b>事件 ID 去重</b>，并先校验签名再处理业务。</p>
+
+    <h2 id="signature">签名校验</h2>
+    <p>签名 = <code>HMAC-SHA256(webhook_secret, 时间戳 + "." + 原始请求体)</code>，十六进制。请使用<b>原始字节</b>计算，不要先反序列化再重新序列化。</p>
+    <div class="code"><div class="code-head"><span>Node.js</span><button class="copy">复制</button></div><pre>const crypto = require('crypto');
+
+function verify(rawBody, header, secret) {
+  const parts = Object.fromEntries(header.split(',').map((p) => p.split('=')));
+  const expected = crypto.createHmac('sha256', secret)
+    .update(`${parts.t}.${rawBody}`)
+    .digest('hex');
+  return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(parts.v1));
+}</pre></div>
+    <div class="code"><div class="code-head"><span>Python</span><button class="copy">复制</button></div><pre>import hmac, hashlib
+
+def verify(raw_body: bytes, header: str, secret: str) -> bool:
+    parts = dict(p.split("=", 1) for p in header.split(","))
+    expected = hmac.new(secret.encode(), f"{parts['t']}.".encode() + raw_body, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, parts["v1"])</pre></div>
+
+    <h2 id="checkout">结账流程</h2>
+    <ol>
+      <li>你的服务端调用创建支付，得到 <code>checkout_url</code>。</li>
+      <li>把付款人浏览器跳转到该地址。付款人登录 SpacePay 并输入 6 位支付 PIN 完成付款。</li>
+      <li>你的服务端收到 <code>payment.succeeded</code> Webhook，校验签名与事件 ID 后发货。</li>
+      <li>付款人浏览器跳转到 <code>success_url</code>。</li>
+    </ol>
+    <p>不要只依赖用户跳回 <code>success_url</code> 判断支付成功——跳转可能被中断；以 Webhook 为准，必要时再调用查询接口确认。</p>
+
+    <h2 id="errors">错误码</h2>
+    <p>错误响应统一为：</p>
+    <div class="code"><div class="code-head"><span>响应</span><button class="copy">复制</button></div><pre>{ "ok": false, "error": "可读说明", "code": "MACHINE_CODE", "request_id": "req_…" }</pre></div>
+    <table class="kv-table">
+      <thead><tr><th>HTTP</th><th>code</th><th>说明</th></tr></thead>
+      <tbody>
+        <tr><td>401</td><td><code>INVALID_API_KEY</code></td><td>密钥缺失、格式错误、已吊销或 Secret 不匹配</td></tr>
+        <tr><td>403</td><td><code>MERCHANT_INACTIVE</code></td><td>商户未通过审核或已被暂停</td></tr>
+        <tr><td>404</td><td><code>PAYMENT_NOT_FOUND</code></td><td>支付单不存在或不属于该商户</td></tr>
+        <tr><td>400</td><td><code>AMOUNT_*</code></td><td>金额缺失、格式、精度、为 0 或超出上限</td></tr>
+        <tr><td>409</td><td><code>REFERENCE_CONFLICT</code></td><td>订单号已用于金额不同的支付</td></tr>
+        <tr><td>409</td><td><code>PAYMENT_NOT_REFUNDABLE</code></td><td>只有成功支付可以退款</td></tr>
+        <tr><td>400</td><td><code>INSUFFICIENT_MERCHANT_BALANCE</code></td><td>可结算余额不足</td></tr>
+        <tr><td>422</td><td><code>IDEMPOTENCY_KEY_REUSED</code></td><td>同一幂等键用于不同参数</td></tr>
+        <tr><td>429</td><td><code>RATE_LIMITED</code></td><td>超过每个 Key 每分钟的请求数</td></tr>
+      </tbody>
+    </table>
+    <p>排查问题时请提供响应里的 <code>request_id</code>，它同时出现在服务端访问日志中。</p>
+
+    <h2 id="limits">限流与幂等</h2>
+    <p><b>限流</b>：每个 API Key 每分钟 120 次请求，超出返回 429。</p>
+    <p><b>幂等</b>：资金类 POST 支持 <code>Idempotency-Key</code> 请求头（8–255 位字母、数字或 <code>- _ : .</code>）。相同 Key + 相同参数在 24 小时内重放原响应，并返回 <code>Idempotent-Replayed: true</code>；参数不同返回 422。网络超时后请用同一个键重试，不要生成新键。</p>
+    <p><b>订单号幂等</b>：<code>reference</code> 相同且金额一致的创建请求会返回同一笔支付，适合作为业务侧的去重键。</p>
+
+    <div class="footer-cta">
+      <div><b>准备好接入了吗？</b><p style="margin:4px 0 0;color:var(--text-2);font-size:13px">提交入驻申请，审核通过后即可创建密钥。</p></div>
+      <a class="btn primary" href="/merchant">进入商户后台</a>
+    </div>
+  </main>
+</div>
+
+<script>
+  document.getElementById('baseUrl').textContent = location.origin + '/api/v1';
+  document.addEventListener('click', (e) => {
+    const b = e.target.closest('.copy');
+    if (!b) return;
+    const pre = b.closest('.code').querySelector('pre');
+    const text = pre.textContent;
+    const done = () => { b.textContent = '已复制'; setTimeout(() => { b.textContent = '复制'; }, 1500); };
+    if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(text).then(done, () => fallback());
+    else fallback();
+    function fallback() {
+      const ta = document.createElement('textarea');
+      ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select();
+      try { document.execCommand('copy'); done(); } catch (_) {}
+      ta.remove();
+    }
+  });
+</script>
+</body>
+</html>
