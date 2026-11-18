@@ -240,6 +240,11 @@
           </div>
         </div>
 
+        <div id="consoleMenu" hidden>
+          <h2 class="group-title">运营后台</h2>
+          <ul class="list" id="consoleMenuList"></ul>
+        </div>
+
         <h2 class="group-title">安全</h2>
         <ul class="list">
           <li><button class="list-row" onclick="openPinSheet()"><span class="row-icon"><i data-icon="key-round" data-size="18"></i></span><span class="row-main"><span class="row-title">支付 PIN</span><span class="row-sub">转账、付款、提现和下单时验证</span></span><span class="row-value" id="pinStatus">—</span><i data-icon="chevron-right" data-size="18" class="row-chevron"></i></button></li>
@@ -254,11 +259,6 @@
           <li><a class="list-row" href="/merchant"><span class="row-icon"><i data-icon="shopping-bag" data-size="18"></i></span><span class="row-main"><span class="row-title">商户后台</span><span class="row-sub">创建 API 密钥、查看支付与结算</span></span><span class="row-value" id="merchantStatus">—</span><i data-icon="chevron-right" data-size="18" class="row-chevron"></i></a></li>
           <li><a class="list-row" href="/docs"><span class="row-icon"><i data-icon="file-text" data-size="18"></i></span><span class="row-main"><span class="row-title">开发者文档</span><span class="row-sub">支付、退款、Webhook 接入说明</span></span><i data-icon="chevron-right" data-size="18" class="row-chevron"></i></a></li>
         </ul>
-
-        <div id="consoleMenu" hidden>
-          <h2 class="group-title">运营后台</h2>
-          <ul class="list" id="consoleMenuList"></ul>
-        </div>
 
         <h2 class="group-title">偏好</h2>
         <ul class="list">
@@ -421,7 +421,6 @@
   <button class="tab-item" data-view="activity" onclick="showView('activity')"><i data-icon="arrow-left-right" data-size="22"></i>交易</button>
   <button class="tab-item cta" onclick="openTransfer()" aria-label="转账"><span class="cta-circle"><i data-icon="send" data-size="20"></i></span>转账</button>
   <button class="tab-item" data-view="invest" onclick="showView('invest')"><i data-icon="chart-line" data-size="22"></i>投资</button>
-  <button class="tab-item" id="consoleTab" data-view="c-overview" onclick="showView('c-overview')" hidden><i data-icon="layout-dashboard" data-size="22"></i>运营</button>
   <button class="tab-item" data-view="settings" onclick="showView('settings')"><i data-icon="user" data-size="22"></i>我的</button>
 </nav>
 

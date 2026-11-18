@@ -85,6 +85,7 @@ const TYPE_LABEL = {
   bonus: '体验金', topup: '充值', transfer_in: '转入', transfer_out: '转出', pay: '付款', refund: '退款',
   withdrawal: '提现', withdrawal_reversal: '提现退回', BUY: '买入', SELL: '卖出', FD_REDEEM: '定存兑付',
   DIVIDEND: '分红', INTEREST: '利息', demo_reset: '数据重置',
+  sale: '经营收入', merchant_refund_out: '退款支出',
 };
 const STATUS = {
   SUCCEEDED: ['成功', 'success'], PENDING: ['处理中', 'warning'], FAILED: ['失败', 'danger'],
@@ -116,6 +117,7 @@ const TYPE_ICON = {
   bonus: 'gift', topup: 'plus', transfer_in: 'arrow-down-left', transfer_out: 'arrow-up-right', refund: 'undo-2',
   withdrawal: 'landmark', withdrawal_reversal: 'rotate-ccw', BUY: 'trending-up', SELL: 'banknote', FD_REDEEM: 'piggy-bank',
   DIVIDEND: 'coins', INTEREST: 'percent', demo_reset: 'rotate-ccw',
+  sale: 'banknote', merchant_refund_out: 'undo-2',
 };
 function txIcon(t) { return t.type === 'pay' ? (CATEGORY_ICON[t.category] || 'credit-card') : (TYPE_ICON[t.type] || 'receipt'); }
 // 交易标题：对方或商户优先，其次说明
@@ -344,8 +346,6 @@ function enterApp() {
 }
 // 运营后台入口：手机端侧栏隐藏，所以把入口同时放到「我的」菜单里
 function renderConsoleEntry(staff) {
-  const tab = $('consoleTab');
-  if (tab) tab.hidden = !staff;
   const menu = $('consoleMenu');
   const list = $('consoleMenuList');
   if (!menu || !list) return;
@@ -372,8 +372,6 @@ function showView(v) {
     }
     consoleTabs.querySelectorAll('.console-tab').forEach((b) => b.classList.toggle('active', b.dataset.view === v));
   }
-  const cTab = $('consoleTab');
-  if (cTab) cTab.classList.toggle('active', inConsole);
   if (location.hash.slice(1) !== v) history.replaceState(null, '', '#' + v);
   window.scrollTo(0, 0);
   refreshCurrent();

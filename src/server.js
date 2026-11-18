@@ -24,7 +24,7 @@ const cookieParser = require('cookie-parser');
 const rateLimit = require('express-rate-limit');
 const path = require('path');
 
-const { db, audit, withTransaction, backend } = require('./db');
+const { db, audit, withTransaction, backend, backfillMerchantSettleMode } = require('./db');
 const sec = require('./security');
 const logger = require('./logger');
 const money = require('./money');
@@ -80,6 +80,8 @@ function createApp() {
   // ---------- 启动时数据维护 ----------
   const opened = ledger.backfillOpeningBalances(db, withTransaction);
   if (opened) logger.info('ledger.opening_balances_backfilled', { wallets: opened });
+  const settled = backfillMerchantSettleMode(db);
+  if (settled) logger.info('merchant.settle_mode_backfilled', { payments: settled });
   const promoted = rbac.bootstrapAdmins(db);
   if (promoted) logger.info('rbac.admins_bootstrapped', { count: promoted });
   try { purgeExpired(db); } catch (e) { logger.warn('idempotency.purge_failed', { err: e }); }

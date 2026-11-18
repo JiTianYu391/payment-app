@@ -105,6 +105,18 @@ const COLUMN_DEFAULTS = {
   webhook_deliveries: { attempts: 0, status: 'PENDING', last_status_code: null, last_error: null, next_attempt_at: null, delivered_at: null },
   api_logs: { key_id: null, request_id: null, ip: null, duration_ms: null },
 };
+// 老数据补齐：v4.1 之前没有 settle_mode 列，那些已收款的单子历史上都走 merchant:payable，
+// 这里显式回填 'manual'。留 NULL 会让接口和后台显示成空值（看起来像数据丢了），也不利于对账。
+// 幂等：只补 settle_mode 为空的行。
+function backfillMerchantSettleMode(db) {
+  try {
+    const r = db.prepare("UPDATE merchant_payments SET settle_mode = 'manual' WHERE settle_mode IS NULL AND status IN ('SUCCEEDED', 'PARTIALLY_REFUNDED', 'REFUNDED')").run();
+    return (r && r.changes) || 0;
+  } catch (_) {
+    return 0; // 表还不存在（全新库）时忽略
+  }
+}
+
 function applyDefaults(table, row) {
   const defs = COLUMN_DEFAULTS[table];
   if (!defs) return row;
@@ -1074,4 +1086,7 @@ function migrateLegacyJson() {
 }
 migrateLegacyJson();
 
-module.exports = { db: impl.db, audit: impl.audit, withTransaction: impl.withTransaction, backend: backendName, dbPath };
+module.exports = {
+  backfillMerchantSettleMode,
+  db: impl.db, audit: impl.audit, withTransaction: impl.withTransaction, backend: backendName, dbPath,
+};
