@@ -85,7 +85,7 @@ const TYPE_LABEL = {
   bonus: '体验金', topup: '充值', transfer_in: '转入', transfer_out: '转出', pay: '付款', refund: '退款',
   withdrawal: '提现', withdrawal_reversal: '提现退回', BUY: '买入', SELL: '卖出', FD_REDEEM: '定存兑付',
   DIVIDEND: '分红', INTEREST: '利息', demo_reset: '数据重置',
-  sale: '经营收入', merchant_refund_out: '退款支出',
+  sale: '经营收入', merchant_refund_out: '退款支出', settlement: '结算到账',
 };
 const STATUS = {
   SUCCEEDED: ['成功', 'success'], PENDING: ['处理中', 'warning'], FAILED: ['失败', 'danger'],
@@ -117,7 +117,7 @@ const TYPE_ICON = {
   bonus: 'gift', topup: 'plus', transfer_in: 'arrow-down-left', transfer_out: 'arrow-up-right', refund: 'undo-2',
   withdrawal: 'landmark', withdrawal_reversal: 'rotate-ccw', BUY: 'trending-up', SELL: 'banknote', FD_REDEEM: 'piggy-bank',
   DIVIDEND: 'coins', INTEREST: 'percent', demo_reset: 'rotate-ccw',
-  sale: 'banknote', merchant_refund_out: 'undo-2',
+  sale: 'banknote', merchant_refund_out: 'undo-2', settlement: 'arrow-down-left',
 };
 function txIcon(t) { return t.type === 'pay' ? (CATEGORY_ICON[t.category] || 'credit-card') : (TYPE_ICON[t.type] || 'receipt'); }
 // 交易标题：对方或商户优先，其次说明
@@ -1310,7 +1310,7 @@ function reviewW(id, approve) {
 // ---------- 运营后台：商户 / 退款申请 / 商户结算 ----------
 const M_STATUS = { PENDING: ['待审核', 'warning'], ACTIVE: ['正常', 'success'], SUSPENDED: ['已暂停', 'danger'], REJECTED: ['已拒绝', ''] };
 const RR_STATUS = { PENDING: ['待审核', 'warning'], APPROVED: ['已通过', 'success'], REJECTED: ['已驳回', 'danger'] };
-const MPO_STATUS = { PENDING: ['待审核', 'warning'], SUCCEEDED: ['已出款', 'success'], FAILED: ['已驳回', 'danger'] };
+const MPO_STATUS = { PENDING: ['待审核', 'warning'], SUCCEEDED: ['已出款', 'success'], FAILED: ['已驳回', 'danger'], CANCELED: ['已撤销', ''] };
 
 let merchantFilter = 'PENDING';
 let merchantsCache = [];

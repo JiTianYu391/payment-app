@@ -744,6 +744,61 @@ module.exports = function mountMerchant(app, ctx) {
       res.json({ ok: true, message: '结算提现已提交，等待审核', payout: payoutView(p), balance: balanceView(req.merchant.id) });
     });
 
+  // 把可结算余额结转进商户所有者账户（即时结算）。
+  // 主要是给老数据用的：v4.1 之前收的钱都记在 merchant:payable 里，不结转的话
+  // 商户在自己的账户余额里永远看不到这笔钱，只能走「申请提现 + 财务审核」。
+  app.post('/api/merchant/settle-to-wallet', ...mwrite, requirePerm('merchant.payout'), requireMerchant,
+    idempotent(db, 'merchant_settle_to_wallet'), (req, res) => {
+      const m = req.merchant;
+      const ownerId = m.owner_user_id;
+      if (!ownerId) throw badRequest('MERCHANT_ACCOUNT_MISSING', '该商户未绑定所有者账户，无法结转');
+      const available = payableOf(m.id);
+      if (available <= 0) throw badRequest('NOTHING_TO_SETTLE', '可结算余额为 0，没有需要结转的钱');
+      const amountCents = req.body && req.body.amount !== undefined && req.body.amount !== ''
+        ? v.amount(req.body, 'amount', { label: '结转金额' })
+        : available;
+      if (amountCents > available) throw badRequest('AMOUNT_EXCEEDS_BALANCE', `结转金额超过可结算余额，最多 ${fmt(available)}`, { available_cents: available });
+      if (!requireConfirmation(req, res, {
+        action: 'merchant.settle_to_wallet', params: { amount_cents: amountCents },
+        summary: { title: '确认结转到我的账户', lines: [['可结算余额', fmt(available)], ['本次结转', fmt(amountCents)], ['到账账户', '你的 SpacePay 账户余额'], ['结转后余额', fmt(available - amountCents)]] },
+      })) return;
+      const out = withTransaction(() => wallet.applyCash(db, {
+        userId: ownerId, delta: amountCents, type: 'settlement', merchant: m.name, category: '结算到账',
+        description: `${m.name} 可结算余额结转到账户`,
+        refType: 'merchant', refId: m.id,
+        journalType: 'merchant_settlement', contra: PAYABLE, contraUserId: m.id,
+      }));
+      oplog.record(db, req, { action: 'merchant.settle_to_wallet', target_type: 'merchant', target_id: m.id, amount_cents: amountCents });
+      res.json({ ok: true, message: `已结转 ${fmt(amountCents)} 到你的账户余额`, wallet_cents: out.balance, balance: balanceView(m.id) });
+    });
+
+  // 撤销还没被财务处理的结算申请。
+  // 之前点了「提交申请」钱就从可结算余额消失（转进 clearing:merchant_payouts 等待审核），
+  // 商户又没法自己撤回，看起来就像钱没了。这里给它一条退路。
+  app.post('/api/merchant/payouts/:id/cancel', ...mwrite, requirePerm('merchant.payout'), requireMerchant, (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) throw badRequest('ID_INVALID', '结算编号格式不正确');
+    const p = db.prepare('SELECT * FROM merchant_payouts WHERE id = ? AND merchant_id = ?').get(id, req.merchant.id);
+    if (!p) throw notFound('PAYOUT_NOT_FOUND', '结算记录不存在');
+    state.assertTransition('merchant_payout', p.status, 'CANCELED');
+    withTransaction(() => {
+      const upd = db.prepare("UPDATE merchant_payouts SET status = 'CANCELED', reviewed_at = ?, review_note = ? WHERE id = ? AND status = 'PENDING'")
+        .run(now(), '商户已撤销', id);
+      if (!upd.changes) throw conflict('CONCURRENT_MODIFICATION', '该结算申请刚被财务处理，无法撤销');
+      ledger.post(db, {
+        journalType: 'merchant_payout_reversal', refType: 'merchant_payout', refId: id,
+        entries: [{ account: PAYOUT_CLEARING, amount_cents: -p.amount_cents }, { account: PAYABLE, user_id: req.merchant.id, amount_cents: p.amount_cents }],
+        memo: `商户撤销结算 #${id}`,
+      });
+    });
+    oplog.record(db, req, { action: 'merchant.payout.cancel', target_type: 'merchant_payout', target_id: id, amount_cents: p.amount_cents });
+    res.json({
+      ok: true, message: `已撤销，${fmt(p.amount_cents)} 退回可结算余额`,
+      payout: payoutView(db.prepare('SELECT * FROM merchant_payouts WHERE id = ?').get(id)),
+      balance: balanceView(req.merchant.id),
+    });
+  });
+
   app.get('/api/merchant/webhook-deliveries', ...mread, requireMerchant, (req, res) => {
     const rows = db.prepare('SELECT * FROM webhook_deliveries WHERE merchant_id = ? ORDER BY id DESC').all(req.merchant.id).slice(0, 100);
     res.json({ ok: true, items: rows.map((d) => ({ id: d.id, event_id: d.event_id, event_type: d.event_type, status: d.status, attempts: d.attempts, last_status_code: d.last_status_code, last_error: d.last_error, next_attempt_at: d.next_attempt_at, created_at: d.created_at, delivered_at: d.delivered_at })) });
@@ -854,7 +909,7 @@ module.exports = function mountMerchant(app, ctx) {
   });
 
   app.get('/api/admin/merchant-payouts', ...read, (req, res) => {
-    const status = req.query.status ? v.oneOf(String(req.query.status), ['PENDING', 'SUCCEEDED', 'FAILED'], '状态') : '';
+    const status = req.query.status ? v.oneOf(String(req.query.status), ['PENDING', 'SUCCEEDED', 'FAILED', 'CANCELED'], '状态') : '';
     let rows = db.prepare('SELECT * FROM merchant_payouts ORDER BY id DESC').all();
     if (status) rows = rows.filter((p) => p.status === status);
     const names = new Map(db.prepare('SELECT id, name FROM merchants').all().map((m) => [m.id, m.name]));

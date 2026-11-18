@@ -146,12 +146,18 @@ function reconcile(db) {
   // 即时结算清算科目：付款与退款成对入账，余额必须归零
   const merchantIncomeClearing = accountBalance(db, 'clearing:merchant_income');
   if (merchantIncomeClearing !== 0) issues.push({ check: 'clearing_merchant_income_zero', balance_cents: merchantIncomeClearing });
+  // 商户主动把可结算余额结转进账户的钱：已经离开 merchant:payable，但仍属于该商户的收款，
+  // 所以要从预期里扣掉，否则 payable 会与预期永久对不上。
+  // 用 all() 再自行求和：JSON 后端对「聚合 + 复合 WHERE」的支持不可靠，直接取行最稳妥
+  const settledRows = db.prepare("SELECT amount_cents FROM ledger_entries WHERE account = 'merchant:payable' AND journal_type = 'merchant_settlement'").all();
+  const settledToWallet = -(settledRows.reduce((sum, r) => sum + (r.amount_cents || 0), 0));
   const pendingPayouts = db.prepare("SELECT SUM(amount_cents) AS s FROM merchant_payouts WHERE status = 'PENDING'").get();
   const pendingPayoutCents = (pendingPayouts && pendingPayouts.s) || 0;
   const payoutClearing = accountBalance(db, 'clearing:merchant_payouts');
   if (payoutClearing !== pendingPayoutCents) issues.push({ check: 'clearing_merchant_payouts_matches_pending', balance_cents: payoutClearing, pending_cents: pendingPayoutCents });
-  if (merchantPayable + payoutClearing !== merchantExpected) {
-    issues.push({ check: 'merchant_settlement_mismatch', payable_cents: merchantPayable, clearing_cents: payoutClearing, expected_cents: merchantExpected, difference_cents: merchantPayable + payoutClearing - merchantExpected });
+  const merchantOutstanding = merchantExpected - settledToWallet;
+  if (merchantPayable + payoutClearing !== merchantOutstanding) {
+    issues.push({ check: 'merchant_settlement_mismatch', payable_cents: merchantPayable, clearing_cents: payoutClearing, settled_to_wallet_cents: settledToWallet, expected_cents: merchantOutstanding, difference_cents: merchantPayable + payoutClearing - merchantOutstanding });
   }
 
   const totalEntries = db.prepare('SELECT COUNT(*) AS c FROM ledger_entries').get().c;

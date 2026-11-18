@@ -36,6 +36,8 @@
       <h3 id="v41-新增">新增</h3>
       <ul>
         <li><b>收款二维码</b>：创建支付与查询支付时返回 <code>payment.qr</code> 与 <code>payment.qr_svg</code>；新增公开接口 <code>GET /api/checkout/:token/qr</code> 与 <code>GET /api/checkout/:token/qr.svg</code>，支持 <code>size</code> 参数。详见 <a href="/docs/qr">收款二维码</a>。</li>
+        <li><b>可结算余额可结转到账户</b>：<code>POST /api/merchant/settle-to-wallet</code>，v4.1 之前收的钱不必再等财务审核。</li>
+        <li><b>提现申请可撤销</b>：<code>POST /api/merchant/payouts/:id/cancel</code>，审核中的钱不会被卡住。</li>
         <li><b>扫码付款</b>：App 新增「扫一扫」（首页快捷操作、顶栏和 <code>/scan</code>），支持相机扫码、相册选图与粘贴链接。</li>
         <li><b>支付 PIN 输入重做</b>：6 格分段显示、数字键盘、支持粘贴与密码管理器，输错时抖动并清空。</li>
         <li><b>手机端运营后台入口</b>：底部标签栏「运营」+「我的 → 运营后台」菜单 + 窄屏横向板块切换。此前侧栏在窄屏隐藏，管理员在手机上找不到后台。</li>

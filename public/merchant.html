@@ -176,22 +176,33 @@
     <section id="view-payouts" hidden>
       <div class="m-head"><div><h1>结算</h1><p>申请把可结算余额提现到指定账户，需财务审核</p></div></div>
       <div class="kpis" style="grid-template-columns:repeat(2,minmax(0,1fr))">
-        <div class="kpi"><div class="label">可结算余额</div><div class="value" id="pBalance">—</div><div class="note">申请提现后立即冻结，驳回时退回</div></div>
-        <div class="kpi"><div class="label">审核中</div><div class="value" id="pPending">—</div><div class="note">等待财务处理</div></div>
+        <div class="kpi"><div class="label">可结算余额</div><div class="value" id="pBalance">—</div><div class="note">还没转进你账户的钱</div></div>
+        <div class="kpi"><div class="label">审核中</div><div class="value" id="pPending">—</div><div class="note">申请提现后暂时冻结在这里，可撤销</div></div>
+      </div>
+      <div class="panel" style="margin-bottom:16px">
+        <div class="panel-head"><h2>转到我的账户</h2></div>
+        <div class="panel-body">
+          <p class="hint" style="margin:0 0 12px">把可结算余额直接转进你自己的 SpacePay 账户余额，不用等财务审核，到账后可以转账、付款或提现。</p>
+          <div class="actions" style="margin:0">
+            <button class="btn primary" id="settleToWalletBtn" hidden>全部转入我的账户（<span id="settleToWalletAmt">—</span>）</button>
+            <span class="muted" id="settleToWalletEmpty">当前没有可结算余额。</span>
+          </div>
+        </div>
       </div>
       <div class="grid2">
         <div class="panel">
-          <div class="panel-head"><h2>申请结算</h2></div>
+          <div class="panel-head"><h2>申请提现到银行卡</h2></div>
           <div class="panel-body">
             <label class="field"><span>提现金额（USD）</span><input id="poAmount" inputmode="decimal" placeholder="0.00"></label>
             <label class="field"><span>收款账户</span><input id="poDest" maxlength="80" placeholder="例如：招商银行 尾号 1234"></label>
             <div class="actions"><button class="btn primary" id="poSubmit">提交申请</button></div>
             <p class="msg" id="poMsg"></p>
+            <p class="hint">提交后这笔钱会暂时冻结（显示在「审核中」），等财务审核通过后出款；审核期间可以在右侧记录里点「撤销」退回。</p>
           </div>
         </div>
         <div class="panel">
           <div class="panel-head"><h2>结算记录</h2></div>
-          <div class="table-wrap"><table class="m"><thead><tr><th>编号</th><th>状态</th><th class="num">金额</th><th class="hide-s">时间</th></tr></thead><tbody id="payoutsBody"></tbody></table></div>
+          <div class="table-wrap"><table class="m"><thead><tr><th>编号</th><th>状态</th><th class="num">金额</th><th class="hide-s">时间</th><th></th></tr></thead><tbody id="payoutsBody"></tbody></table></div>
         </div>
       </div>
     </section>

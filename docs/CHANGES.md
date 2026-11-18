@@ -25,6 +25,19 @@
    二维码内容就是结账链接，系统相机也能扫；同时兼容 `spacepay://pay/<token>` 与裸 token。
    生成结果用 jsQR 反向解码验证过（含中文内容）。
 
+### 老数据的钱「提不出来」
+
+v4.1 之前，商户收的钱都记在 `merchant:payable`（可结算余额），商户本人在自己的账户余额里看不到，只能
+「申请结算提现 + 财务审核」。更糟的是点了提现后钱转入 `clearing:merchant_payouts` 冻结等待审核，
+商户没有自助撤回的入口，看起来就像钱没了。
+
+- 新增 `POST /api/merchant/settle-to-wallet`：把可结算余额一键结转进商户所有者账户，记账
+  `[{wallet, owner, +X}, {merchant:payable, merchant, −X}]`，实时到账、不经过审核；商户后台「结算」页有入口；
+- 新增 `POST /api/merchant/payouts/:id/cancel`：审核中的提现申请可由商户自行撤销，钱立刻退回可结算余额；
+- `merchant_payout` 状态机增加 `PENDING → CANCELED`；
+- 对账计入结转金额（`settled_to_wallet_cents`），避免 `merchant:payable` 与预期对不上；
+- 老支付单回填 `settle_mode='manual'`，字段不再留空。
+
 ### 支付 PIN 输入重做
 
 原来是一个输入框靠 `letter-spacing` 撑开。现在升级成「6 个视觉格子 + 一个覆盖在上面的透明输入框」，

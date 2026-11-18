@@ -83,6 +83,22 @@ console.log(balance.available);</pre>
         </tbody>
       </table>
 
+      <h2 id="settle-to-wallet">把可结算余额转进自己的账户</h2>
+      <p>如果不想走财务审核，可以把可结算余额直接结转进商户所有者的 SpacePay 账户余额，立刻可用（转账、付款、提现）。v4.1 之前收的钱都在可结算余额里，用这个接口就能提出来。</p>
+      <div class="endpoint"><span class="method post">POST</span><span class="path">/api/merchant/settle-to-wallet</span><span class="note">商户后台会话，需二次确认</span></div>
+      <table class="doc-table">
+        <thead><tr><th>参数</th><th>类型</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td><code>amount</code><span class="opt">可选</span></td><td>string</td><td>结转金额，省略时结转全部可结算余额</td></tr>
+        </tbody>
+      </table>
+      <p>可结算余额为 0 时返回 <code>NOTHING_TO_SETTLE</code>；超过余额返回 <code>AMOUNT_EXCEEDS_BALANCE</code>。结转后资金来源与账户的关系仍然可追溯，对账会通过。</p>
+
+      <h2 id="cancel-payout">撤销审核中的提现</h2>
+      <p>提现申请提交后，这笔钱会从可结算余额转入在途科目（<code>clearing:merchant_payouts</code>）并冻结，直到财务处理。审核期间商户可以自己撤销，钱立刻退回可结算余额：</p>
+      <div class="endpoint"><span class="method post">POST</span><span class="path">/api/merchant/payouts/:id/cancel</span><span class="note">仅 PENDING 状态可撤销</span></div>
+      <p>已出款或已被驳回的申请不能再撤销，返回 <code>409 INVALID_STATE_TRANSITION</code>。</p>
+
       <h2 id="create-payout">申请结算提现</h2>
       <div class="endpoint"><span class="method post">POST</span><span class="path">/api/v1/payouts</span><span class="note">需要 API Key</span></div>
       <table class="doc-table">

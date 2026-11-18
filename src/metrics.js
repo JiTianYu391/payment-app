@@ -6,7 +6,7 @@ const TX_TYPES = {
   bonus: '体验金', topup: '充值', transfer_in: '转入', transfer_out: '转出', pay: '付款', refund: '退款',
   withdrawal: '提现', withdrawal_reversal: '提现退回', BUY: '买入', SELL: '卖出', FD_REDEEM: '定存兑付',
   DIVIDEND: '分红', INTEREST: '利息', demo_reset: '数据重置',
-  sale: '经营收入', merchant_refund_out: '退款支出',
+  sale: '经营收入', merchant_refund_out: '退款支出', settlement: '结算到账',
 };
 
 // 交易状态（语义化徽标用）
@@ -16,7 +16,7 @@ const TX_STATUSES = {
 
 // 外部资金流入 / 流出：资金跨越钱包边界（进入或离开用户的 SpacePay 账户）
 // sale / merchant_refund_out：商户即时结算模式下，付款人与商户所有者之间的钱包往来。
-const INFLOW_TYPES = ['bonus', 'topup', 'transfer_in', 'refund', 'withdrawal_reversal', 'sale'];
+const INFLOW_TYPES = ['bonus', 'topup', 'transfer_in', 'refund', 'withdrawal_reversal', 'sale', 'settlement'];
 const OUTFLOW_TYPES = ['transfer_out', 'pay', 'withdrawal', 'merchant_refund_out'];
 const EXTERNAL_FLOW_TYPES = [...INFLOW_TYPES, ...OUTFLOW_TYPES];
 // 投资往来（钱包 ↔ 持仓，不改变总资产）与投资收益
@@ -24,7 +24,7 @@ const INVEST_TYPES = ['BUY', 'SELL', 'FD_REDEEM'];
 const INCOME_TYPES = ['DIVIDEND', 'INTEREST'];
 
 const DEFINITIONS = {
-  inflow: '收入 = 体验金 + 充值 + 转入 + 退款 + 提现退回 + 经营收入（外部资金流入）',
+  inflow: '收入 = 体验金 + 充值 + 转入 + 退款 + 提现退回 + 经营收入 + 结算到账（外部资金流入）',
   outflow: '支出 = 付款 + 转出 + 提现 + 退款支出（外部资金流出）',
   net_flow: '净流入 = 收入 − 支出',
   investment_net: '投资净额 = 卖出 + 定存兑付 − 买入（钱包与持仓之间的往来，不计入收支）',

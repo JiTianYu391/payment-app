@@ -81,6 +81,8 @@
           <tr><td>400</td><td><code>PAYMENT_NOT_REFUNDABLE</code></td><td>只有成功支付可以退款</td></tr>
           <tr><td>400</td><td><code>REFUND_EXCEEDS_REMAINING</code></td><td>退款超过可退金额，<code>details.refundable_cents</code> 给出上限</td></tr>
           <tr><td>400</td><td><code>INSUFFICIENT_MERCHANT_BALANCE</code></td><td>商户可用于退款的余额不足（即时到账看账户余额，待结算看可结算余额），<code>details.available_cents</code> 给出当前值</td></tr>
+          <tr><td>400</td><td><code>NOTHING_TO_SETTLE</code></td><td>可结算余额为 0，没有需要结转的钱</td></tr>
+          <tr><td>400</td><td><code>AMOUNT_EXCEEDS_BALANCE</code></td><td>结转金额超过可结算余额，<code>details.available_cents</code> 给出上限</td></tr>
           <tr><td>400</td><td><code>MERCHANT_ACCOUNT_MISSING</code></td><td>商户没有绑定所有者账户，无法即时到账或退款；改成待结算模式或联系运营</td></tr>
           <tr><td>409</td><td><code>CONCURRENT_MODIFICATION</code></td><td>并发修改冲突，刷新后重试</td></tr>
         </tbody>

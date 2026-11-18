@@ -164,7 +164,22 @@ module.exports = function scenario(env) {
     assert.equal(r.body.balance.available_cents, 0);
     assert.equal(r.body.balance.pending_payout_cents, 1000);
 
-    c = await app.confirmed('POST', `/api/admin/merchant-payouts/${payoutId}/approve`, { token: admin.token, body: {} });
+    // 审核中的申请，商户可以自己撤销：钱退回可结算余额，不会被卡在「审核中」出不来
+    r = await app.call('POST', `/api/merchant/payouts/${payoutId}/cancel`, { token: owner.token, body: {} });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal(r.body.payout.status, 'CANCELED');
+    assert.equal(r.body.balance.available_cents, 1000);
+    assert.equal(r.body.balance.pending_payout_cents, 0);
+    // 已撤销的不能再撤销一次
+    r = await app.call('POST', `/api/merchant/payouts/${payoutId}/cancel`, { token: owner.token, body: {} });
+    assert.equal(r.status, 409);
+    assert.equal(r.body.code, 'INVALID_STATE_TRANSITION');
+    // 撤销后重新申请，仍然走财务审核
+    c = await app.confirmed('POST', '/api/merchant/payouts', { token: owner.token, body: { amount: '10.00', destination: '招商银行 尾号 8888' } });
+    assert.equal(c.final.status, 200, JSON.stringify(c.final.body));
+    const payoutId2 = c.final.body.payout.numeric_id;
+
+    c = await app.confirmed('POST', `/api/admin/merchant-payouts/${payoutId2}/approve`, { token: admin.token, body: {} });
     assert.equal(c.final.status, 200, JSON.stringify(c.final.body));
 
     // 对账必须通过
@@ -269,5 +284,23 @@ module.exports = function scenario(env) {
     r = await app.call('GET', '/api/v1/balance', { headers: apiHeaders });
     assert.equal(r.body.balance.available_cents, 800);
     assert.equal(r.body.balance.settlement_mode, 'manual');
+
+    // 可结算余额可以一键结转进自己的账户，不用等财务审核
+    const beforeSettle = await app.balance(owner.token);
+    const settled = await app.confirmed('POST', '/api/merchant/settle-to-wallet', { token: owner.token, body: {} });
+    assert.equal(settled.final.status, 200, JSON.stringify(settled.final.body));
+    assert.equal(await app.balance(owner.token), beforeSettle + 800);
+    r = await app.call('GET', '/api/v1/balance', { headers: apiHeaders });
+    assert.equal(r.body.balance.available_cents, 0);
+    assert.equal(r.body.balance.wallet_cents, beforeSettle + 800);
+
+    // 没有可结算余额时结转被拒绝
+    r = await app.confirmed('POST', '/api/merchant/settle-to-wallet', { token: owner.token, body: {} });
+    assert.equal(r.first.status, 400);
+    assert.equal(r.first.body.code, 'NOTHING_TO_SETTLE');
+
+    // 结转之后账本仍然对得上
+    r = await app.call('GET', '/api/admin/reconciliation', { token: admin.token });
+    assert.deepEqual(r.body.reconciliation.issues, [], JSON.stringify(r.body.reconciliation.issues));
   });
 };

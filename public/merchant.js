@@ -16,7 +16,7 @@ const PAY_STATUS = {
   CREATED: ['待支付', 'warning'], SUCCEEDED: ['成功', 'success'], PARTIALLY_REFUNDED: ['部分退款', 'info'],
   REFUNDED: ['已退款', ''], FAILED: ['失败', 'danger'], CANCELED: ['已取消', ''], EXPIRED: ['已过期', ''],
 };
-const PO_STATUS = { PENDING: ['审核中', 'warning'], SUCCEEDED: ['已出款', 'success'], FAILED: ['已驳回', 'danger'] };
+const PO_STATUS = { PENDING: ['审核中', 'warning'], SUCCEEDED: ['已出款', 'success'], FAILED: ['已驳回', 'danger'], CANCELED: ['已撤销', ''] };
 const WH_STATUS = { PENDING: ['重试中', 'warning'], DELIVERED: ['已送达', 'success'], FAILED: ['失败', 'danger'] };
 function badge(map, key) { const [label, cls] = map[key] || [key || '—', '']; return `<span class="badge ${cls}">${esc(label)}</span>`; }
 
@@ -241,10 +241,35 @@ async function loadPayouts() {
   if (!r.ok) return toast(r.error || '加载失败');
   $('pBalance').textContent = cents(r.balance.available_cents);
   $('pPending').textContent = cents(r.balance.pending_payout_cents);
-  $('payoutsBody').innerHTML = r.items.length ? r.items.map((x) => `<tr><td class="mono">${esc(x.id)}</td><td>${badge(PO_STATUS, x.status)}</td><td class="num">${cents(x.amount_cents)}</td><td class="hide-s">${fmtTime(x.created_at)}</td></tr>`).join('')
-    : '<tr><td colspan="4" class="empty">还没有结算记录。</td></tr>';
+  $('payoutsBody').innerHTML = r.items.length ? r.items.map((x) => {
+    // 审核中的申请可以自己撤销：钱会立刻退回可结算余额
+    const act = x.status === 'PENDING' ? `<button class="btn sm ghost" data-cancel="${x.numeric_id}">撤销</button>` : '—';
+    return `<tr><td class="mono">${esc(x.id)}</td><td>${badge(PO_STATUS, x.status)}</td><td class="num">${cents(x.amount_cents)}</td><td class="hide-s">${fmtTime(x.created_at)}</td><td class="act">${act}</td></tr>`;
+  }).join('')
+    : '<tr><td colspan="5" class="empty">还没有结算记录。</td></tr>';
+  $('payoutsBody').querySelectorAll('[data-cancel]').forEach((b) => b.addEventListener('click', () => cancelPayout(Number(b.dataset.cancel))));
+  // 有可结算余额时，给一条不经过财务审核的出路
+  const hasAvailable = r.balance.available_cents > 0;
+  $('settleToWalletBtn').hidden = !hasAvailable;
+  $('settleToWalletEmpty').hidden = hasAvailable;
+  $('settleToWalletAmt').textContent = cents(r.balance.available_cents);
   msg('poMsg', '');
 }
+async function cancelPayout(id) {
+  const r = await api(`/api/merchant/payouts/${id}/cancel`, { method: 'POST', body: {} });
+  if (!r.ok) return toast(r.error || '撤销失败');
+  toast(r.message || '已撤销');
+  loadPayouts();
+}
+$('settleToWalletBtn').addEventListener('click', async () => {
+  $('settleToWalletBtn').disabled = true;
+  const r = await postWithConfirm('/api/merchant/settle-to-wallet', {}, newKey());
+  $('settleToWalletBtn').disabled = false;
+  if (!r.ok) return toast(r.error || '结转失败');
+  toast(r.message || '已结转到账户余额');
+  loadPayouts();
+});
+
 $('poSubmit').addEventListener('click', async () => {
   const amount = $('poAmount').value.trim();
   if (!amount) return msg('poMsg', '请输入金额', true);

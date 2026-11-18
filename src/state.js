@@ -33,9 +33,10 @@ const MACHINES = {
   },
   // 商户结算提现：申请 → 财务批准 / 驳回
   merchant_payout: {
-    PENDING: ['SUCCEEDED', 'FAILED'],
+    PENDING: ['SUCCEEDED', 'FAILED', 'CANCELED'],
     SUCCEEDED: [],
     FAILED: [],
+    CANCELED: [],
   },
   // 商户准入：申请 → 通过 / 拒绝；通过后可暂停与恢复
   merchant: {
