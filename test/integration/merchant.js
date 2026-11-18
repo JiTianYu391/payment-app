@@ -54,6 +54,12 @@ module.exports = function scenario(env) {
     const key = r.body.key.token;
     const apiHeaders = { Authorization: 'Bearer ' + key };
 
+    // 本用例专测「待结算」模式：收款先计入 merchant:payable，提现需财务审核。
+    // 「即时结算」模式见下一个用例。
+    r = await app.call('PATCH', '/api/merchant/profile', { token: owner.token, body: { settlement_mode: 'manual' } });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal(r.body.merchant.settlement_mode, 'manual');
+
     // 未知/损坏密钥
     r = await app.call('GET', '/api/v1/balance', { headers: { Authorization: 'Bearer sp_live_0000000000000000_invalidinvalidinvalid' } });
     assert.equal(r.status, 401);
@@ -77,6 +83,21 @@ module.exports = function scenario(env) {
     assert.equal(r.status, 409);
     assert.equal(r.body.code, 'REFERENCE_CONFLICT');
 
+    // 收款二维码：商户可直接把接口嵌进自己的收银台
+    assert.equal(pay.qr.payload, pay.checkout_url, '二维码内容应等于结账链接');
+    assert.ok(pay.qr_svg && pay.qr_svg.startsWith('<svg'), '创建支付时应返回内联二维码 SVG');
+    let qrRes = await app.call('GET', pay.qr.svg_url, { raw: true });
+    assert.equal(qrRes.status, 200);
+    assert.match(String(qrRes.headers.get('content-type')), /image\/svg\+xml/);
+    assert.ok(qrRes.buf.toString('utf8').includes('<svg'));
+    qrRes = await app.call('GET', '/api/checkout/' + pay.qr.svg_url.split('/')[3] + '/qr?size=320');
+    assert.equal(qrRes.status, 200);
+    assert.equal(qrRes.body.qr.payload, pay.checkout_url);
+    assert.equal(qrRes.body.qr.size, 320);
+    assert.ok(qrRes.body.qr.svg.includes('width="320"'));
+    qrRes = await app.call('GET', '/api/checkout/not-a-real-token/qr.svg', { raw: true });
+    assert.equal(qrRes.status, 404);
+
     // 结账：指定付款人
     const token = new URL(pay.checkout_url).searchParams.get('token');
     const other = await app.signup('other@shop.test');
@@ -93,6 +114,10 @@ module.exports = function scenario(env) {
     r = await app.call('POST', `/api/checkout/${token}/pay`, { token: buyer.token, body: { pin: '123456' } });
     assert.equal(r.status, 409);
     assert.equal(r.body.code, 'PAYMENT_NOT_PAYABLE');
+
+    // 付款成功后二维码失效，避免重复收款
+    r = await app.call('GET', `/api/checkout/${token}/qr.svg`, { raw: true });
+    assert.equal(r.status, 409);
 
     // 商户余额
     r = await app.call('GET', '/api/v1/balance', { headers: apiHeaders });
@@ -153,5 +178,96 @@ module.exports = function scenario(env) {
     assert.equal(r.status, 200);
     r = await app.call('GET', '/api/v1/balance', { headers: apiHeaders });
     assert.equal(r.status, 401);
+  });
+
+  // 即时结算：默认模式，收款直接进商户所有者本人钱包，退款从该钱包扣回。
+  test('商户即时结算：收款进本人钱包、退款扣回、对账通过', async (t) => {
+    // 同进程内复用同一邮箱会触发「验证码发送太频繁」，所以本用例换管理员邮箱
+    const app = await startApp({ ...env, ADMIN_EMAILS: 'admin2@spacepay.test' });
+    t.after(async () => { await app.close(); });
+
+    const admin = await app.signup('admin2@spacepay.test');
+    const owner = await app.signup('owner@instant.test');
+    const buyer = await app.signup('buyer@instant.test');
+
+    let r = await app.call('POST', '/api/merchant/apply', { token: owner.token, body: { name: '即时结算商户' } });
+    assert.equal(r.status, 201, JSON.stringify(r.body));
+    r = await app.call('GET', '/api/admin/merchants?status=PENDING', { token: admin.token });
+    const mid = r.body.items[0].id;
+    const c = await app.confirmed('POST', `/api/admin/merchants/${mid}/approve`, { token: admin.token, body: {} });
+    assert.equal(c.final.status, 200, JSON.stringify(c.final.body));
+
+    // 新商户默认即时结算
+    r = await app.call('GET', '/api/merchant/profile', { token: owner.token });
+    assert.equal(r.body.merchant.settlement_mode, 'auto');
+
+    r = await app.call('POST', '/api/merchant/keys', { token: owner.token, body: { label: '即时', mode: 'live' } });
+    const apiHeaders = { Authorization: 'Bearer ' + r.body.key.token };
+
+    const ownerBefore = await app.balance(owner.token);
+    const buyerBefore = await app.balance(buyer.token);
+
+    r = await app.call('POST', '/api/v1/payments', { headers: apiHeaders, body: { amount: '20.00', reference: 'instant-1', description: '扫码收款' } });
+    const pay = r.body.payment;
+    const token = new URL(pay.checkout_url).searchParams.get('token');
+
+    r = await app.call('POST', `/api/checkout/${token}/pay`, { token: buyer.token, body: { pin: '123456' } });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal(r.body.payment.settle_mode, 'auto', '订单应记录为即时结算');
+
+    // 钱进商户所有者本人钱包，而不是平台待结算科目
+    assert.equal(await app.balance(owner.token), ownerBefore + 2000);
+    assert.equal(await app.balance(buyer.token), buyerBefore - 2000);
+    r = await app.call('GET', '/api/v1/balance', { headers: apiHeaders });
+    assert.equal(r.body.balance.available_cents, 0, '即时结算不产生待结算余额');
+    assert.equal(r.body.balance.settlement_mode, 'auto');
+    assert.equal(r.body.balance.wallet_cents, ownerBefore + 2000);
+    assert.equal(r.body.balance.pending_payout_cents, 0);
+
+    // 商户的交易流水能看到这笔收入
+    r = await app.call('GET', '/api/transactions?type=sale', { token: owner.token });
+    assert.ok(r.body.items.some((x) => x.ref_type === 'merchant_payment' && x.ref_id === pay.numeric_id), '商户流水应包含这笔收款');
+
+    // 部分退款 5.00：商户钱包扣回，买家退回
+    r = await app.call('POST', `/api/v1/payments/${pay.numeric_id}/refund`, { headers: apiHeaders, body: { amount: '5.00', reason: '部分退单' } });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal(r.body.payment.status, 'PARTIALLY_REFUNDED');
+    assert.equal(await app.balance(owner.token), ownerBefore + 1500);
+    assert.equal(await app.balance(buyer.token), buyerBefore - 1500);
+
+    // 退款不能超过商户钱包余额（先把钱转走，再看是否拒绝）
+    const poor = await app.signup('poor@instant.test');
+    r = await app.call('POST', '/api/v1/payments', { headers: apiHeaders, body: { amount: '30.00', reference: 'instant-2' } });
+    const pay2 = r.body.payment;
+    const token2 = new URL(pay2.checkout_url).searchParams.get('token');
+    r = await app.call('POST', `/api/checkout/${token2}/pay`, { token: poor.token, body: { pin: '123456' } });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    const ownerBal = await app.balance(owner.token);
+    // 把余额几乎全部转走，只留 1.00
+    const withdrawable = ownerBal - 100;
+    r = await app.call('POST', '/api/transfer', { token: owner.token, body: { to_email: buyer.email, amount: (withdrawable / 100).toFixed(2), pin: '123456' } });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal(await app.balance(owner.token), 100);
+    r = await app.call('POST', `/api/v1/payments/${pay2.numeric_id}/refund`, { headers: apiHeaders, body: { amount: '5.00', reason: '余额不足' } });
+    assert.equal(r.status, 400);
+    assert.equal(r.body.code, 'INSUFFICIENT_MERCHANT_BALANCE');
+
+    // 账本对账必须通过（含即时结算清算科目归零）
+    r = await app.call('GET', '/api/admin/reconciliation', { token: admin.token });
+    assert.deepEqual(r.body.reconciliation.issues, [], JSON.stringify(r.body.reconciliation.issues));
+    assert.equal(r.body.reconciliation.clearing.merchant_income_cents, 0);
+
+    // 切回待结算后，新收款重新计入 payable
+    r = await app.call('PATCH', '/api/merchant/profile', { token: owner.token, body: { settlement_mode: 'manual' } });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    r = await app.call('POST', '/api/v1/payments', { headers: apiHeaders, body: { amount: '8.00', reference: 'manual-after-switch' } });
+    const token3 = new URL(r.body.payment.checkout_url).searchParams.get('token');
+    const before3 = await app.balance(owner.token);
+    r = await app.call('POST', `/api/checkout/${token3}/pay`, { token: buyer.token, body: { pin: '123456' } });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal(await app.balance(owner.token), before3, '待结算模式不动商户钱包');
+    r = await app.call('GET', '/api/v1/balance', { headers: apiHeaders });
+    assert.equal(r.body.balance.available_cents, 800);
+    assert.equal(r.body.balance.settlement_mode, 'manual');
   });
 };

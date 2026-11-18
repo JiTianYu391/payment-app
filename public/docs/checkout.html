@@ -37,6 +37,12 @@
       <div class="callout danger"><span class="ico">!</span><span>不要用浏览器跳回 <code>success_url</code> 作为支付成功的依据——跳转可能被关闭、网络中断或被伪造。以 Webhook 为准。</span></div>
 
       <h2 id="how-to-redirect">如何跳转</h2>
+      <p>三种把顾客带到结账页的方式，按场景选：</p>
+      <ul>
+        <li><b>网页跳转</b>：下单后把 <code>checkout_url</code> 交给浏览器（下面示例）。</li>
+        <li><b>扫码</b>：把 <code>payment.qr.svg_url</code> 显示在收银台或小票上，顾客用相机扫一下。见 <a href="/docs/qr">收款二维码</a>。</li>
+        <li><b>深链</b>：二维码里也可以放 <code>spacepay://pay/&lt;token&gt;</code>，由 SpacePay 客户端接管。</li>
+      </ul>
       <div class="codeblock">
         <div class="code-head"><div class="lang-tabs"><button class="active" data-lang="node">Node.js</button><button data-lang="python">Python</button><button data-lang="curl">curl</button></div><button class="copy">复制</button></div>
 <pre data-lang="node">// 创建支付后，把地址返回给前端，由前端跳转

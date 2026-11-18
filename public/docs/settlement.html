@@ -23,7 +23,18 @@
   <main class="doc-main">
     <article class="doc-article">
       <h1>结算余额与提现</h1>
-      <p class="lede">查看商户可结算余额，申请把余额提现到指定账户。提现需财务审核，审核通过后出款（本环境为模拟出款）。</p>
+      <p class="lede">商户收款有两种到账方式：默认<b>即时到账</b>（钱直接进商户所有者的账户余额），也可以切成<b>待结算</b>（先记在可结算余额，再申请提现，需财务审核）。这里说明两者的余额口径与提现流程。</p>
+
+      <h2 id="mode">两种到账方式</h2>
+      <table class="doc-table">
+        <thead><tr><th>settlement_mode</th><th>钱去了哪</th><th>怎么用</th></tr></thead>
+        <tbody>
+          <tr><td><code>auto</code><span class="opt">默认</span></td><td>付款成功后直接进商户所有者的 SpacePay 账户余额（<code>wallet_cents</code>）</td><td>可以在 App 里直接转账、付款、提现；不需要申请结算</td></tr>
+          <tr><td><code>manual</code></td><td>先记入可结算余额（<code>available_cents</code>）</td><td>在商户后台申请结算提现，财务审核通过后出款</td></tr>
+        </tbody>
+      </table>
+      <p>在商户后台「商户资料 → 收款到账方式」切换。切换只影响之后的收款，已经到账的钱不会回滚。</p>
+      <div class="callout info"><span class="ico">i</span><span><b>退款从哪扣：</b>即时到账的订单从商户账户余额扣回；待结算的订单从可结算余额扣。因此即时到账模式下，若商户已把余额转出，退款会返回 <code>INSUFFICIENT_MERCHANT_BALANCE</code>，需要先充值再退。</span></div>
 
       <h2 id="balance">查询余额</h2>
       <div class="endpoint"><span class="method get">GET</span><span class="path">/api/v1/balance</span><span class="note">需要 API Key</span></div>
@@ -54,6 +65,9 @@ console.log(balance.available);</pre>
     "available": "10.00",
     "pending_payout_cents": 0,
     "pending_payout": "0.00",
+    "settlement_mode": "manual",
+    "wallet_cents": 0,
+    "wallet": "0.00",
     "currency": "USD"
   }
 }</pre>
@@ -61,8 +75,11 @@ console.log(balance.available);</pre>
       <table class="doc-table">
         <thead><tr><th>字段</th><th>说明</th></tr></thead>
         <tbody>
-          <tr><td><code>available_cents</code></td><td>可结算余额 = 成功支付 − 已退款 − 已出款 − 审核中的提现</td></tr>
+          <tr><td><code>available_cents</code></td><td>可结算余额 = 成功支付 − 已退款 − 已出款 − 审核中的提现。<b>即时到账模式下恒为 0</b></td></tr>
           <tr><td><code>pending_payout_cents</code></td><td>已申请、等待审核的提现金额</td></tr>
+          <tr><td><code>settlement_mode</code></td><td>当前到账方式：<code>auto</code> 即时到账 / <code>manual</code> 待结算</td></tr>
+          <tr><td><code>wallet_cents</code></td><td>商户所有者账户的可用余额（即时到账的钱在这里）</td></tr>
+          <tr><td><code>wallet</code></td><td>同上，十进制字符串</td></tr>
         </tbody>
       </table>
 

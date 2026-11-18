@@ -149,6 +149,13 @@ function createApp() {
   }));
   app.use(express.json({ limit: '100kb' }));
   app.use(cookieParser());
+  // 扫码页用的二维码解码库：直接从 node_modules 映射，不把第三方代码拷进仓库
+  const jsqrFile = require.resolve('jsqr');
+  app.get('/vendor/jsqr.js', (req, res) => {
+    res.type('application/javascript');
+    res.set('Cache-Control', 'public, max-age=86400');
+    res.sendFile(jsqrFile);
+  });
   app.use(express.static(path.join(__dirname, '..', 'public')));
 
   const limitMax = parseInt(process.env.RATE_LIMIT_MAX || '300', 10);
@@ -761,7 +768,7 @@ function createApp() {
   app.use('/api', (req, res) => sendError(req, res, 404, 'NOT_FOUND', '接口不存在'));
   // 开发者文档站（独立静态页面，不经过主 SPA）
   const DOCS_DIR = path.join(__dirname, '..', 'public', 'docs');
-  const DOCS_PAGES = new Set(['payments', 'payment-query', 'refunds', 'settlement', 'webhooks', 'checkout', 'errors', 'limits', 'security', 'changelog']);
+  const DOCS_PAGES = new Set(['payments', 'qr', 'payment-query', 'refunds', 'settlement', 'webhooks', 'checkout', 'errors', 'limits', 'security', 'changelog']);
   app.get(['/docs', '/docs/'], (req, res) => res.sendFile(path.join(DOCS_DIR, 'index.html')));
   app.get('/docs/:page', (req, res) => {
     if (!DOCS_PAGES.has(req.params.page)) return res.redirect(302, '/docs');
@@ -771,6 +778,7 @@ function createApp() {
   // 商户后台与结账页
   app.get('/merchant', (req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'merchant.html')));
   app.get('/pay', (req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'pay.html')));
+  app.get('/scan', (req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'scan.html')));
   app.get('*', (req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'index.html')));
   app.use(errorHandler);
 

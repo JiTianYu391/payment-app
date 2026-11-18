@@ -30,6 +30,9 @@
   </a>
   <div class="top-meta" id="topMeta" hidden>
     <span id="simDay" class="sim-day hide-sm" title="模拟市场每 10 分钟推进 1 个模拟日"></span>
+    <button class="icon-btn" id="scanBtnTop" onclick="openScan()" aria-label="扫一扫" title="扫一扫">
+      <i data-icon="scan-line" data-size="18"></i>
+    </button>
     <button class="icon-btn notif-btn" id="notifBtn" onclick="openNotifications()" aria-label="通知">
       <i data-icon="bell" data-size="18"></i><span class="notif-dot" id="notifDot" hidden></span>
     </button>
@@ -110,6 +113,9 @@
   </div></nav>
 
   <main class="main" id="main">
+    <!-- 手机端运营后台板块切换：桌面端用侧栏，窄屏用这排横向标签 -->
+    <nav class="console-tabs" id="consoleTabs" aria-label="运营后台板块" hidden></nav>
+
     <!-- ============ 首页 ============ -->
     <section id="view-home" class="view" hidden>
       <div class="greeting"><h1 id="greet">你好</h1><p id="homeAsOf"></p></div>
@@ -121,6 +127,7 @@
             <div class="hero-sub"><span>现金 <b id="kCash">—</b></span><span>投资 <b id="kInvested">—</b></span><span class="pill" id="kToday">今日 —</span></div>
             <div class="actions">
               <button class="action primary" onclick="openTransfer()"><span class="action-icon"><i data-icon="send"></i></span>转账</button>
+              <button class="action" onclick="openScan()"><span class="action-icon"><i data-icon="scan-line"></i></span>扫一扫</button>
               <button class="action" onclick="openSheet('payModal')"><span class="action-icon"><i data-icon="credit-card"></i></span>付款</button>
               <button class="action" onclick="openSheet('topupModal')"><span class="action-icon"><i data-icon="plus"></i></span>充值</button>
               <button class="action" onclick="openWithdraw()"><span class="action-icon"><i data-icon="landmark"></i></span>提现</button>
@@ -247,6 +254,11 @@
           <li><a class="list-row" href="/merchant"><span class="row-icon"><i data-icon="shopping-bag" data-size="18"></i></span><span class="row-main"><span class="row-title">商户后台</span><span class="row-sub">创建 API 密钥、查看支付与结算</span></span><span class="row-value" id="merchantStatus">—</span><i data-icon="chevron-right" data-size="18" class="row-chevron"></i></a></li>
           <li><a class="list-row" href="/docs"><span class="row-icon"><i data-icon="file-text" data-size="18"></i></span><span class="row-main"><span class="row-title">开发者文档</span><span class="row-sub">支付、退款、Webhook 接入说明</span></span><i data-icon="chevron-right" data-size="18" class="row-chevron"></i></a></li>
         </ul>
+
+        <div id="consoleMenu" hidden>
+          <h2 class="group-title">运营后台</h2>
+          <ul class="list" id="consoleMenuList"></ul>
+        </div>
 
         <h2 class="group-title">偏好</h2>
         <ul class="list">
@@ -409,6 +421,7 @@
   <button class="tab-item" data-view="activity" onclick="showView('activity')"><i data-icon="arrow-left-right" data-size="22"></i>交易</button>
   <button class="tab-item cta" onclick="openTransfer()" aria-label="转账"><span class="cta-circle"><i data-icon="send" data-size="20"></i></span>转账</button>
   <button class="tab-item" data-view="invest" onclick="showView('invest')"><i data-icon="chart-line" data-size="22"></i>投资</button>
+  <button class="tab-item" id="consoleTab" data-view="c-overview" onclick="showView('c-overview')" hidden><i data-icon="layout-dashboard" data-size="22"></i>运营</button>
   <button class="tab-item" data-view="settings" onclick="showView('settings')"><i data-icon="user" data-size="22"></i>我的</button>
 </nav>
 
@@ -709,6 +722,7 @@
   <div class="modal-foot"><button type="button" class="btn" onclick="closeModal('goalsModal')">关闭</button><button class="btn primary">添加目标</button></div></form></div>
 
 <script src="/icons.js"></script>
+<script src="/pin.js"></script>
 <script src="/charts.js"></script>
 <script src="/app.js"></script>
 </body>

@@ -10,6 +10,7 @@ const NAV = [
   ] },
   { group: '接口参考', items: [
     { id: 'payments', title: '创建支付', href: '/docs/payments' },
+    { id: 'qr', title: '收款二维码', href: '/docs/qr' },
     { id: 'payment-query', title: '查询支付与列表', href: '/docs/payment-query' },
     { id: 'refunds', title: '退款', href: '/docs/refunds' },
     { id: 'settlement', title: '结算余额与提现', href: '/docs/settlement' },

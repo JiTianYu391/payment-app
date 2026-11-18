@@ -98,6 +98,7 @@
   <p class="pay-foot">由 SpacePay 提供支付服务 · 虚拟资金，不接入真实银行卡<br>遇到问题请在商户后台提交退款申请</p>
 </div>
 
+<script src="/pin.js"></script>
 <script>
 'use strict';
 const $ = (id) => document.getElementById(id);
@@ -167,6 +168,7 @@ async function pay() {
   $('payBtn').disabled = false;
   if (!j.ok) {
     if (j.status === 401) { $('payForm').hidden = true; $('loginPrompt').hidden = false; $('loginBtn').href = '/?next=' + encodeURIComponent(location.pathname + location.search); return msg('登录已过期，请重新登录', true); }
+    if (j.code === 'PIN_INCORRECT' || j.code === 'PIN_REQUIRED') window.pinShake && window.pinShake('pin');
     return msg(j.error || '付款失败', true);
   }
   showResult(true, '付款成功', '已向 ' + payment.merchant.name + ' 支付 ' + cents(payment.amount_cents), j.success_url || null);

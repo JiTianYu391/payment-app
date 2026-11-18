@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>扫一扫 · SpacePay</title>
+<meta name="robots" content="noindex">
+<meta name="theme-color" content="#0B0F14">
+<link rel="icon" href="/brand/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/styles.css">
+<style>
+  body { background: #0B0F14; color: #fff; }
+  .scan-page { position: fixed; inset: 0; display: flex; flex-direction: column; background: #0B0F14; }
+  .scan-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: calc(12px + var(--safe-top)) 16px 8px; }
+  .scan-title { font-size: 15px; font-weight: 600; }
+  .scan-close { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; border: 0; border-radius: 50%; background: rgba(255,255,255,.12); color: #fff; font-size: 18px; cursor: pointer; }
+  .scan-stage { position: relative; flex: 1; overflow: hidden; }
+  .scan-stage video { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .scan-frame { position: absolute; left: 50%; top: 50%; width: min(68vw, 280px); aspect-ratio: 1; transform: translate(-50%, -50%); border-radius: 18px; box-shadow: 0 0 0 100vmax rgba(0,0,0,.5); }
+  .scan-frame::before, .scan-frame::after { content: ""; position: absolute; width: 34px; height: 34px; border: 3px solid #fff; border-radius: 4px; }
+  .scan-frame::before { left: 0; top: 0; border-right: 0; border-bottom: 0; border-top-left-radius: 12px; }
+  .scan-frame::after { right: 0; bottom: 0; border-left: 0; border-top: 0; border-bottom-right-radius: 12px; }
+  .scan-laser { position: absolute; left: 8%; right: 8%; height: 2px; top: 8%; background: linear-gradient(90deg, transparent, #6E8BFF, transparent); border-radius: 2px; animation: scan-sweep 2.4s ease-in-out infinite; }
+  @keyframes scan-sweep { 0%, 100% { top: 8%; opacity: .2; } 50% { top: 92%; opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) { .scan-laser { animation: none; top: 50%; } }
+  .scan-tip { position: absolute; left: 0; right: 0; bottom: calc(16px + var(--safe-bottom)); text-align: center; font-size: 13px; color: rgba(255,255,255,.75); }
+  .scan-panel { padding: 0 16px calc(16px + var(--safe-bottom)); background: #0B0F14; }
+  .scan-msg { min-height: 18px; margin: 6px 0 10px; font-size: 13px; color: #FFB4B4; }
+  .scan-manual { display: flex; gap: 8px; }
+  .scan-manual input { flex: 1; min-width: 0; height: 44px; padding: 0 12px; border: 1px solid rgba(255,255,255,.2); border-radius: 10px; background: rgba(255,255,255,.08); color: #fff; font: inherit; font-size: 16px; }
+  .scan-manual input::placeholder { color: rgba(255,255,255,.5); }
+  .scan-manual .btn { flex: none; height: 44px; background: #3B5BDB; color: #fff; border-color: transparent; }
+  .scan-alt { display: flex; gap: 8px; margin-top: 10px; }
+  .scan-alt .btn { flex: 1; height: 40px; background: rgba(255,255,255,.1); color: #fff; border-color: transparent; }
+  .scan-panel .hint { color: rgba(255,255,255,.55); font-size: 12px; line-height: 1.7; margin-top: 10px; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<div class="scan-page">
+  <header class="scan-head">
+    <span class="scan-title">扫一扫</span>
+    <button class="scan-close" onclick="leave()" aria-label="关闭">✕</button>
+  </header>
+
+  <div class="scan-stage">
+    <video id="video" playsinline muted autoplay></video>
+    <div class="scan-frame" id="frame" hidden><span class="scan-laser"></span></div>
+    <p class="scan-tip" id="tip">把商户的收款二维码放进框内</p>
+  </div>
+
+  <div class="scan-panel">
+    <p class="scan-msg" id="msg" role="status"></p>
+    <form class="scan-manual" onsubmit="event.preventDefault(); submitManual()">
+      <input id="manual" inputmode="text" autocomplete="off" placeholder="或粘贴结账链接 / 支付单号">
+      <button class="btn primary" type="submit">打开</button>
+    </form>
+    <div class="scan-alt">
+      <button class="btn" id="retryBtn" onclick="startCamera()" hidden>重新开启相机</button>
+      <button class="btn" id="albumBtn" onclick="pickAlbum()">从相册选图</button>
+    </div>
+    <p class="hint">二维码内容就是商户的结账链接，扫到会直接打开付款页。相机打不开时，可以粘贴链接或选一张二维码截图。</p>
+    <input id="album" type="file" accept="image/*" hidden onchange="decodeFile(this.files[0])">
+  </div>
+</div>
+
+<script src="/vendor/jsqr.js"></script>
+<script>
+'use strict';
+const $ = (id) => document.getElementById(id);
+const video = $('video');
+let stream = null, raf = null, scanning = false, busy = false, stopped = false;
+
+function msg(text) { $('msg').textContent = text || ''; }
+
+// 从二维码内容里取出支付 token：支持结账链接、spacepay:// 深链、以及裸 token
+function parsePayload(raw) {
+  const t = String(raw || '').trim();
+  if (!t) return null;
+  let m = /[?&]token=([A-Za-z0-9_-]{8,64})/.exec(t);
+  if (m) return m[1];
+  m = /^spacepay:\/\/pay\/?([A-Za-z0-9_-]{8,64})$/.exec(t);
+  if (m) return m[1];
+  if (/^[A-Za-z0-9_-]{16,64}$/.test(t)) return t;
+  return null;
+}
+
+function go(token) {
+  if (stopped) return;
+  stopped = true;
+  stopCamera();
+  location.replace('/pay.html?token=' + encodeURIComponent(token));
+}
+
+function submitManual() {
+  const token = parsePayload($('manual').value);
+  if (!token) return msg('没认出支付信息，请确认链接完整或换一张二维码');
+  go(token);
+}
+
+// 降采样到固定宽度：手机摄像头原图太大，直接丢给解码器会卡
+const canvas = document.createElement('canvas');
+const ctx = canvas.getContext('2d', { willReadFrequently: true });
+const TARGET_WIDTH = 640;
+
+function grabFrame() {
+  if (!video.videoWidth) return null;
+  const scale = Math.min(1, TARGET_WIDTH / video.videoWidth);
+  canvas.width = Math.round(video.videoWidth * scale);
+  canvas.height = Math.round(video.videoHeight * scale);
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+  return ctx.getImageData(0, 0, canvas.width, canvas.height);
+}
+
+function scanLoop() {
+  if (!scanning) return;
+  raf = requestAnimationFrame(scanLoop);
+  if (busy || video.readyState < 2) return;
+  const frame = grabFrame();
+  if (!frame) return;
+  busy = true;
+  // 优先用系统自带解码器（更快、更省电），没有再用 jsQR
+  if ('BarcodeDetector' in window) {
+    detectWithNative(frame).finally(() => { busy = false; });
+  } else {
+    try {
+      const found = window.jsQR && window.jsQR(frame.data, frame.width, frame.height, { inversionAttempts: 'dontInvert' });
+      if (found) { const token = parsePayload(found.data); if (token) { busy = false; return go(token); } }
+    } catch (_) { /* 单帧解码失败继续扫 */ }
+    busy = false;
+  }
+}
+
+let nativeDetector = null;
+async function detectWithNative(frame) {
+  try {
+    if (!nativeDetector) nativeDetector = new window.BarcodeDetector({ formats: ['qr_code'] });
+    const codes = await nativeDetector.detect(canvas);
+    if (codes && codes.length) {
+      const token = parsePayload(codes[0].rawValue);
+      if (token) return go(token);
+    }
+  } catch (_) {
+    // 系统解码器不可用时退回 jsQR
+    try {
+      const found = window.jsQR && window.jsQR(frame.data, frame.width, frame.height, { inversionAttempts: 'dontInvert' });
+      if (found) { const token = parsePayload(found.data); if (token) go(token); }
+    } catch (__) { /* 忽略 */ }
+  }
+}
+
+async function startCamera() {
+  msg('');
+  $('retryBtn').hidden = true;
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    return cameraBlocked('这个浏览器不支持调用相机，请改用粘贴链接或从相册选图');
+  }
+  try {
+    stopCamera();
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
+      audio: false,
+    });
+    video.srcObject = stream;
+    await video.play();
+    $('frame').hidden = false;
+    $('tip').textContent = '把商户的收款二维码放进框内';
+    scanning = true;
+    scanLoop();
+  } catch (e) {
+    cameraBlocked(e && e.name === 'NotAllowedError' ? '相机权限被拒绝，可以在浏览器设置里允许后重试' : '相机打不开，请改用粘贴链接或从相册选图');
+  }
+}
+
+function cameraBlocked(text) {
+  msg(text);
+  $('frame').hidden = true;
+  $('retryBtn').hidden = false;
+  $('tip').textContent = '未能使用相机';
+}
+
+function stopCamera() {
+  scanning = false;
+  if (raf) { cancelAnimationFrame(raf); raf = null; }
+  if (stream) { stream.getTracks().forEach((t) => t.stop()); stream = null; }
+  video.srcObject = null;
+}
+
+function pickAlbum() { $('album').click(); }
+
+function decodeFile(file) {
+  if (!file) return;
+  msg('');
+  const img = new Image();
+  const url = URL.createObjectURL(file);
+  img.onload = () => {
+    URL.revokeObjectURL(url);
+    const scale = Math.min(1, 1000 / Math.max(img.width, img.height));
+    canvas.width = Math.round(img.width * scale);
+    canvas.height = Math.round(img.height * scale);
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    const frame = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    let found = null;
+    try {
+      found = window.jsQR && window.jsQR(frame.data, frame.width, frame.height, { inversionAttempts: 'attemptBoth' });
+    } catch (_) { /* 忽略 */ }
+    if (!found) return msg('这张图片里没找到二维码，换一张更清晰的试试');
+    const token = parsePayload(found.data);
+    if (!token) return msg('这不是 SpacePay 的收款二维码');
+    go(token);
+  };
+  img.onerror = () => { URL.revokeObjectURL(url); msg('图片读取失败'); };
+  img.src = url;
+}
+
+function leave() {
+  stopCamera();
+  if (history.length > 1) history.back(); else location.replace('/');
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) stopCamera();
+  else if (!stopped) startCamera();
+});
+window.addEventListener('pagehide', stopCamera);
+
+startCamera();
+</script>
+</body>
+</html>

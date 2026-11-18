@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>收款二维码 · SpacePay 开发者文档</title>
+<meta name="description" content="用 API 拿到支付二维码：内联 SVG、SVG 图片地址与 JSON 接口，直接嵌进商户自己的收银台、小程序或小票。">
+<meta name="theme-color" content="#FFFFFF" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#141920" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="/brand/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/styles.css">
+<link rel="stylesheet" href="/docs/docs.css">
+<script>try { var t = localStorage.getItem('spacepay_theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}</script>
+</head>
+<body class="doc-body" data-page="qr">
+<header class="doc-header" id="docHeader"></header>
+<div class="doc-scrim" id="docScrim"></div>
+<div class="doc-shell">
+  <aside class="doc-side" id="docSide">
+    <div class="doc-search"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="docSearch" type="search" placeholder="搜索文档" aria-label="搜索文档"></div>
+    <nav class="doc-nav" id="docNav"></nav>
+  </aside>
+  <main class="doc-main">
+    <article class="doc-article">
+      <h1>收款二维码</h1>
+      <p class="lede">不必让顾客停留在 SpacePay 的结账页：用接口拿到二维码，直接展示在你的收银台、小程序、自助机或打印小票上。顾客用手机相机或 SpacePay「扫一扫」扫描，就会打开付款页。</p>
+
+      <div class="callout info"><span class="ico">i</span><span>二维码内容就是 <code>checkout_url</code>，任何系统相机都能识别，不依赖本平台的客户端。二维码里不含密钥，可以安全地打印或投屏。</span></div>
+
+      <h2 id="ways">三种拿到二维码的方式</h2>
+      <table class="doc-table">
+        <thead><tr><th>方式</th><th>适合场景</th></tr></thead>
+        <tbody>
+          <tr><td><code>payment.qr_svg</code><br><span class="muted">创建支付时直接返回</span></td><td>服务端渲染小票、生成 PDF、把 SVG 存进你自己的数据库</td></tr>
+          <tr><td><code>payment.qr.svg_url</code><br><span class="muted">图片地址</span></td><td>最简单：直接塞进 <code>&lt;img src&gt;</code>，手机端和桌面端都适用</td></tr>
+          <tr><td><code>GET /api/checkout/:token/qr</code></td><td>需要在运行时换尺寸，或想一次拿到 payload 和 SVG 的场景</td></tr>
+        </tbody>
+      </table>
+
+      <h2 id="qr-endpoint">二维码 JSON 接口</h2>
+      <div class="endpoint"><span class="method get">GET</span><span class="path">/api/checkout/:token/qr</span><span class="note">公开接口，无需 API Key</span></div>
+      <table class="doc-table">
+        <thead><tr><th>参数</th><th>类型</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td><code>size</code><span class="opt">可选</span></td><td>integer</td><td>输出尺寸（像素），<code>96</code>–<code>1024</code>，默认 <code>256</code></td></tr>
+        </tbody>
+      </table>
+      <div class="codeblock">
+        <div class="code-head"><div class="lang-tabs"><button class="active" data-lang="curl">curl</button><button data-lang="python">Python</button><button data-lang="node">Node.js</button></div><button class="copy">复制</button></div>
+<pre data-lang="curl">curl "https://your-domain/api/checkout/$TOKEN/qr?size=320"</pre>
+<pre data-lang="python" hidden>import requests
+
+qr = requests.get(
+    f"https://your-domain/api/checkout/{token}/qr",
+    params={"size": 320},
+    timeout=15,
+).json()["qr"]
+
+print(qr["payload"])   # 结账链接
+open("pay.svg", "w", encoding="utf-8").write(qr["svg"])</pre>
+<pre data-lang="node" hidden>const { qr } = await (await fetch(
+  `https://your-domain/api/checkout/${token}/qr?size=320`,
+)).json();
+
+console.log(qr.payload); // 结账链接
+fs.writeFileSync('pay.svg', qr.svg);</pre>
+      </div>
+      <div class="codeblock">
+        <div class="code-head"><div class="lang-tabs"><button class="active" data-lang="json">JSON</button></div><button class="copy">复制</button></div>
+<pre data-lang="json">{
+  "ok": true,
+  "qr": {
+    "payment_id": "pay_42",
+    "reference": "order-2026-0001",
+    "amount_cents": 1234,
+    "payload": "https://your-domain/pay.html?token=AbCdEfGh…",
+    "size": 320,
+    "svg": "&lt;svg xmlns=…&gt;",
+    "svg_url": "/api/checkout/AbCdEfGh…/qr.svg",
+    "expires_at": 1770000000000
+  }
+}</pre>
+      </div>
+
+      <h2 id="qr-image">二维码图片</h2>
+      <div class="endpoint"><span class="method get">GET</span><span class="path">/api/checkout/:token/qr.svg</span><span class="note">返回 image/svg+xml</span></div>
+      <p>直接当图片地址用，不需要任何 SDK：</p>
+      <div class="codeblock">
+        <div class="code-head"><div class="lang-tabs"><button class="active" data-lang="html">HTML</button></div><button class="copy">复制</button></div>
+<pre data-lang="html">&lt;img
+  src="https://your-domain/api/checkout/AbCdEfGh…/qr.svg?size=320"
+  width="320" height="320"
+  alt="扫码付款"&gt;</pre>
+      </div>
+      <p>SVG 是矢量格式，打印到小票或 A4 都不会糊；<code>size</code> 只影响 <code>width</code>/<code>height</code> 属性，矢量精度不受影响。</p>
+
+      <h2 id="create">创建支付时一起拿到</h2>
+      <p><code>POST /api/v1/payments</code> 的响应里已经带好二维码，不需要再请求一次：</p>
+      <div class="codeblock">
+        <div class="code-head"><div class="lang-tabs"><button class="active" data-lang="json">JSON</button></div><button class="copy">复制</button></div>
+<pre data-lang="json">{
+  "ok": true,
+  "payment": {
+    "id": "pay_42",
+    "checkout_url": "https://your-domain/pay.html?token=AbCdEfGh…",
+    "qr": {
+      "payload": "https://your-domain/pay.html?token=AbCdEfGh…",
+      "svg_url": "/api/checkout/AbCdEfGh…/qr.svg",
+      "json_url": "/api/checkout/AbCdEfGh…/qr"
+    },
+    "qr_svg": "&lt;svg xmlns=…&gt;"
+  }
+}</pre>
+      </div>
+      <div class="callout warn"><span class="ico">!</span><span>只有 <code>CREATED</code> 状态的支付单能出二维码。付款完成、取消或过期后接口返回 <code>409 PAYMENT_NOT_PAYABLE</code>，避免同一个码被重复收款。</span></div>
+
+      <h2 id="payload">二维码里到底是什么</h2>
+      <p>默认是结账链接（<code>https://your-domain/pay.html?token=…</code>）。如果你的系统需要自己生成二维码，可以直接用 <code>qr.payload</code>，也可以用下面两种等价写法：</p>
+      <ul>
+        <li>结账链接：<code>https://your-domain/pay.html?token=&lt;token&gt;</code></li>
+        <li>深链：<code>spacepay://pay/&lt;token&gt;</code></li>
+        <li>裸 token：<code>&lt;token&gt;</code>（16–64 位 <code>A-Z a-z 0-9 _ -</code>）</li>
+      </ul>
+      <p>SpacePay 的「扫一扫」三种都认；用系统相机扫时建议用结账链接那种，兼容性最好。</p>
+
+      <h2 id="notes">注意事项</h2>
+      <ul>
+        <li><code>payment.qr_svg</code> 只在创建支付和查询单笔支付时返回；列表接口不带，避免响应过大。</li>
+        <li>二维码接口是公开的（付款人不需要登录也能打开结账页），但 token 是 24 字节随机串，猜不到。</li>
+        <li>不要把二维码图片缓存太久：支付完成后码就失效了，建议 <code>max-age</code> 不超过 60 秒。</li>
+        <li>打印小票时保持四周至少 2 个模块的空白，太窄会扫不出来。</li>
+      </ul>
+    </article>
+    <nav class="prevnext" id="pageNav"></nav>
+  </main>
+</div>
+<aside class="doc-toc" id="docToc"></aside>
+<script src="/docs/docs.js" defer></script>
+</body>
+</html>

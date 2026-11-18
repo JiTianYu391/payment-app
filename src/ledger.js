@@ -24,6 +24,8 @@ const CONTRA_ACCOUNTS = {
   INTEREST: 'market:income',
   FD_OPEN: 'deposits:fixed',             // 定存申购 / 支取 / 到期
   FD_CLOSE: 'deposits:fixed',
+  merchant_settlement: 'clearing:merchant_income', // 商户即时结算：付款人 → 商户所有者钱包，两笔分录后清算科目归零
+  merchant_income: 'clearing:merchant_income',
   demo_reset: 'platform:demo_reset',
   opening_balance: 'platform:opening_balance', // 升级前已有余额的期初分录
 };
@@ -123,7 +125,9 @@ function reconcile(db) {
   const wClearing = accountBalance(db, 'clearing:withdrawals');
   if (wClearing !== pendingCents) issues.push({ check: 'clearing_withdrawals_matches_pending', balance_cents: wClearing, pending_cents: pendingCents });
 
-  // 商户：待结算余额 = 成功支付 − 已退款；在途结算 = 待审核提现合计
+  // 商户：待结算余额 = 结算模式为 manual 的成功支付 − 已退款 − 已出款。
+  // 即时结算（settle_mode='auto'）的钱已经进商户所有者钱包，不经过 merchant:payable，
+  // 因此这里只统计 manual 支付单，否则 payable 会与预期永久对不上。
   const payableRows = db.prepare("SELECT user_id, SUM(amount_cents) AS s FROM ledger_entries WHERE account = 'merchant:payable' GROUP BY user_id").all();
   const payableByMerchant = new Map(payableRows.map((r) => [r.user_id, r.s]));
   const merchants = db.prepare('SELECT id, name FROM merchants').all();
@@ -133,11 +137,15 @@ function reconcile(db) {
     const bal = payableByMerchant.get(m.id) || 0;
     merchantPayable += bal;
     if (bal < 0) issues.push({ check: 'merchant_payable_negative', merchant_id: m.id, merchant_name: m.name, balance_cents: bal });
-    const paid = db.prepare('SELECT amount_cents, refunded_cents, status FROM merchant_payments WHERE merchant_id = ?').all(m.id)
-      .filter((p) => ['SUCCEEDED', 'PARTIALLY_REFUNDED', 'REFUNDED'].includes(p.status));
+    const paid = db.prepare('SELECT amount_cents, refunded_cents, status, settle_mode FROM merchant_payments WHERE merchant_id = ?').all(m.id)
+      .filter((p) => ['SUCCEEDED', 'PARTIALLY_REFUNDED', 'REFUNDED'].includes(p.status))
+      .filter((p) => p.settle_mode !== 'auto');
     const paidOut = db.prepare("SELECT amount_cents, status FROM merchant_payouts WHERE merchant_id = ? AND status = 'SUCCEEDED'").all(m.id);
     merchantExpected += paid.reduce((s, p) => s + p.amount_cents - p.refunded_cents, 0) - paidOut.reduce((s, p) => s + p.amount_cents, 0);
   }
+  // 即时结算清算科目：付款与退款成对入账，余额必须归零
+  const merchantIncomeClearing = accountBalance(db, 'clearing:merchant_income');
+  if (merchantIncomeClearing !== 0) issues.push({ check: 'clearing_merchant_income_zero', balance_cents: merchantIncomeClearing });
   const pendingPayouts = db.prepare("SELECT SUM(amount_cents) AS s FROM merchant_payouts WHERE status = 'PENDING'").get();
   const pendingPayoutCents = (pendingPayouts && pendingPayouts.s) || 0;
   const payoutClearing = accountBalance(db, 'clearing:merchant_payouts');
@@ -154,7 +162,7 @@ function reconcile(db) {
     entries: totalEntries,
     wallets: wallets.length,
     wallet_total_cents: walletTotal,
-    clearing: { p2p_cents: p2p, withdrawals_in_transit_cents: wClearing, merchant_payable_cents: merchantPayable, merchant_in_transit_cents: payoutClearing },
+    clearing: { p2p_cents: p2p, withdrawals_in_transit_cents: wClearing, merchant_payable_cents: merchantPayable, merchant_in_transit_cents: payoutClearing, merchant_income_cents: merchantIncomeClearing },
     merchants: merchants.length,
     issues,
   };

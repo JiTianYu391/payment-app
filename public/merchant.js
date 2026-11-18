@@ -207,6 +207,14 @@ async function openPayment(id) {
     + row('创建时间', fmtTime(p.created_at)) + (p.paid_at ? row('付款时间', fmtTime(p.paid_at)) : '')
     + (r.refunds && r.refunds.length ? row('退款记录', r.refunds.map((x) => `${cents(x.amount_cents)}（${esc(x.reason || '')}）`).join('<br>')) : '');
   const canRefund = p.refundable_cents > 0 && ['SUCCEEDED', 'PARTIALLY_REFUNDED'].includes(p.status) && (me.permissions || []).includes('merchant.refund');
+  // 未付款的支付单才展示收款码：付过款或已过期的码不能再扫
+  const showQr = p.status === 'CREATED' && p.qr && p.qr.svg_url;
+  $('qrBox').hidden = !showQr;
+  if (showQr) {
+    $('payQrImg').src = p.qr.svg_url + '?size=480';
+    $('payQrLink').href = p.checkout_url;
+    $('payQrCopy').onclick = () => { navigator.clipboard && navigator.clipboard.writeText(p.checkout_url).then(() => toast('结账链接已复制')); };
+  }
   $('refundBox').hidden = !canRefund;
   $('rfAmount').value = (p.refundable_cents / 100).toFixed(2);
   $('rfReason').value = '';
@@ -320,14 +328,15 @@ async function loadProfile() {
   $('pfName').value = r.merchant.name;
   $('pfWebsite').value = r.merchant.website || '';
   $('pfDesc').value = r.merchant.description || '';
+  $('pfSettle').value = r.merchant.settlement_mode === 'manual' ? 'manual' : 'auto';
   msg('pfMsg', '');
 }
 $('pfSave').addEventListener('click', async () => {
   $('pfSave').disabled = true;
-  const r = await api('/api/merchant/profile', { method: 'PATCH', body: { name: $('pfName').value.trim(), website: $('pfWebsite').value.trim(), description: $('pfDesc').value.trim() } });
+  const r = await api('/api/merchant/profile', { method: 'PATCH', body: { name: $('pfName').value.trim(), website: $('pfWebsite').value.trim(), description: $('pfDesc').value.trim(), settlement_mode: $('pfSettle').value } });
   $('pfSave').disabled = false;
   msg('pfMsg', r.ok ? '已保存' : (r.error || '保存失败'), !r.ok);
-  if (r.ok) { merchant.name = r.merchant.name; $('merchantName').textContent = merchant.name; toast('资料已更新'); }
+  if (r.ok) { merchant.name = r.merchant.name; merchant.settlement_mode = r.merchant.settlement_mode; $('merchantName').textContent = merchant.name; toast('资料已更新'); }
 });
 
 boot().catch((e) => { console.error(e); gate('加载失败', '请刷新页面重试。', ''); });

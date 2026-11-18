@@ -18,6 +18,7 @@ const state = require('./state');
 const oplog = require('./oplog');
 const logger = require('./logger');
 const notify = require('./notify');
+const qr = require('./qr');
 const { idempotent } = require('./idempotency');
 const { requireConfirmation } = require('./confirm');
 const { AppError, badRequest, forbidden, notFound, conflict, sendError } = require('./errors');
@@ -28,6 +29,9 @@ const ah = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch
 const PAYMENT_TTL_MS = 30 * 60 * 1000;
 const PAYOUT_CLEARING = 'clearing:merchant_payouts';
 const PAYABLE = 'merchant:payable';
+// 即时结算的过桥科目：付款人钱包出账与商户所有者钱包入账成对写，余额始终归零。
+const CLEARING_INCOME = 'clearing:merchant_income';
+const SETTLE_MODES = ['auto', 'manual'];
 const API_RATE_LIMIT = parseInt(process.env.MERCHANT_RATE_LIMIT || '120', 10);
 const RETRY_DELAYS = [0, 60e3, 5 * 60e3, 30 * 60e3, 2 * 3600e3, 6 * 3600e3];
 const WEBHOOK_TIMEOUT_MS = 10000;
@@ -89,20 +93,38 @@ function merchantView(m) {
   return {
     id: m.id, name: m.name, email: m.email, status: m.status, website: m.website || null,
     description: m.description || null, webhook_url: m.webhook_url || null,
-    webhook_configured: !!m.webhook_url, created_at: m.created_at, updated_at: m.updated_at,
+    webhook_configured: !!m.webhook_url, settlement_mode: m.settlement_mode === 'manual' ? 'manual' : 'auto',
+    created_at: m.created_at, updated_at: m.updated_at,
   };
 }
 
-function paymentView(p, req) {
+// 付款链接：既是结账地址，也是二维码里编码的内容。任何相机 App 扫到都能直接打开付款页。
+function checkoutUrlFor(req, token) {
+  if (!token || !req) return null;
+  return `${baseUrl(req)}/pay.html?token=${encodeURIComponent(token)}`;
+}
+
+function paymentView(p, req, opts = {}) {
   const meta = parseJson(p.metadata_json, {});
-  return {
+  const checkoutUrl = checkoutUrlFor(req, p.checkout_token);
+  const view = {
     id: `pay_${p.id}`, object: 'payment', numeric_id: p.id, reference: p.reference,
     amount_cents: p.amount_cents, amount: money.centsToDecimal(p.amount_cents), currency: p.currency,
     status: p.status, refunded_cents: p.refunded_cents, refundable_cents: p.amount_cents - p.refunded_cents,
     description: p.description || null, customer_email: p.customer_email || null,
-    metadata: meta, checkout_url: p.checkout_token && req ? `${baseUrl(req)}/pay.html?token=${encodeURIComponent(p.checkout_token)}` : null,
+    settle_mode: p.settle_mode || null,
+    metadata: meta, checkout_url: checkoutUrl,
+    // 二维码：拿 qr.svg_url 直接当图片地址用，或取 qr.svg 内联到自己的页面/小票/收银台。
+    // payload 就是结账链接本身，商户也可以用它自己生成任意尺寸的码。
+    qr: p.checkout_token ? {
+      payload: checkoutUrl,
+      svg_url: `/api/checkout/${p.checkout_token}/qr.svg`,
+      json_url: `/api/checkout/${p.checkout_token}/qr`,
+    } : null,
     created_at: p.created_at, paid_at: p.paid_at || null, expires_at: p.created_at + PAYMENT_TTL_MS,
   };
+  if (opts.inlineQr && checkoutUrl) view.qr_svg = qr.toSvg(checkoutUrl, { size: opts.qrSize || 256 });
+  return view;
 }
 
 module.exports = function mountMerchant(app, ctx) {
@@ -313,7 +335,7 @@ module.exports = function mountMerchant(app, ctx) {
       throw e;
     }
     const p = db.prepare('SELECT * FROM merchant_payments WHERE id = ?').get(r.lastInsertRowid);
-    res.status(201).json({ ok: true, payment: paymentView(p, req) });
+    res.status(201).json({ ok: true, payment: paymentView(p, req, { inlineQr: true }) });
   }));
 
   app.get('/api/v1/payments/:id', ...api, (req, res) => {
@@ -321,7 +343,7 @@ module.exports = function mountMerchant(app, ctx) {
     const p = db.prepare('SELECT * FROM merchant_payments WHERE id = ? AND merchant_id = ?').get(id, req.merchant.id);
     if (!p) throw notFound('PAYMENT_NOT_FOUND', '支付单不存在');
     const refunds = db.prepare('SELECT * FROM merchant_refunds WHERE payment_id = ? ORDER BY id DESC').all(id);
-    res.json({ ok: true, payment: paymentView(p, req), refunds: refunds.map(refundView) });
+    res.json({ ok: true, payment: paymentView(p, req, { inlineQr: true }), refunds: refunds.map(refundView) });
   });
 
   app.get('/api/v1/payments', ...api, (req, res) => {
@@ -366,6 +388,38 @@ module.exports = function mountMerchant(app, ctx) {
     res.json({ ok: true, payment: checkoutView(p, req) });
   });
 
+  // ---------- 收款二维码 ----------
+  // 设计目标：商户不需要停留在开放平台页面上。把下面三个接口接进自己的收银台、小程序或打印小票即可：
+  //   GET /api/checkout/:token/qr        → JSON，含 payload 与内联 SVG
+  //   GET /api/checkout/:token/qr.svg    → 直接当 <img src> 用
+  // 二维码内容就是结账链接，任何相机 App 扫到都能直接打开付款页，不依赖本平台客户端。
+  function qrTarget(req) {
+    const p = findCheckout(req.params.token);
+    if (p.status !== 'CREATED') throw conflict('PAYMENT_NOT_PAYABLE', `该支付单当前状态为「${state.LABELS[p.status] || p.status}」，不能收款`);
+    const size = v.intInRange(req.query.size, { min: 96, max: 1024, def: 256, label: '尺寸' });
+    return { p, size, payload: checkoutUrlFor(req, p.checkout_token) };
+  }
+
+  app.get('/api/checkout/:token/qr.svg', (req, res) => {
+    const { size, payload } = qrTarget(req);
+    res.type('image/svg+xml');
+    res.set('Cache-Control', 'private, max-age=60');
+    res.send(qr.toSvg(payload, { size }));
+  });
+
+  app.get('/api/checkout/:token/qr', (req, res) => {
+    const { p, size, payload } = qrTarget(req);
+    res.json({
+      ok: true,
+      qr: {
+        payment_id: `pay_${p.id}`, reference: p.reference, amount_cents: p.amount_cents,
+        payload, size, svg: qr.toSvg(payload, { size }),
+        svg_url: `/api/checkout/${p.checkout_token}/qr.svg`,
+        expires_at: p.created_at + PAYMENT_TTL_MS,
+      },
+    });
+  });
+
   app.post('/api/checkout/:token/pay', auth, requireActive, requirePin,
     (req, res, next) => idempotent(db, `checkout_pay_${req.user.id}`)(req, res, next), (req, res) => {
       const p = findCheckout(req.params.token);
@@ -374,15 +428,29 @@ module.exports = function mountMerchant(app, ctx) {
       const m = db.prepare('SELECT * FROM merchants WHERE id = ?').get(p.merchant_id);
       if (!m || m.status !== 'ACTIVE') throw conflict('MERCHANT_INACTIVE', '商户暂不可收款');
       if (p.customer_email && p.customer_email !== req.user.email) throw forbidden('CUSTOMER_MISMATCH', '该支付单指定了其他付款人');
+      // 结算模式：auto = 收款即时进入商户所有者本人钱包；manual = 先记入待结算，需在商户后台申请提现。
+      // 商户所有者自己付款时退回 manual，避免钱包自转自导致账本出现零金额往返。
+      const useAutoSettle = m.settlement_mode !== 'manual' && !!m.owner_user_id && m.owner_user_id !== req.user.id;
       const out = withTransaction(() => {
-        const upd = db.prepare("UPDATE merchant_payments SET status = 'SUCCEEDED', customer_user_id = ?, paid_at = ?, updated_at = ? WHERE id = ? AND status = 'CREATED'")
-          .run(req.user.id, now(), now(), p.id);
+        const upd = db.prepare("UPDATE merchant_payments SET status = 'SUCCEEDED', customer_user_id = ?, paid_at = ?, settle_mode = ?, updated_at = ? WHERE id = ? AND status = 'CREATED'")
+          .run(req.user.id, now(), useAutoSettle ? 'auto' : 'manual', now(), p.id);
         if (!upd.changes) throw conflict('PAYMENT_NOT_PAYABLE', '该支付单已被处理，请刷新后查看');
         const mv = wallet.applyCash(db, {
           userId: req.user.id, delta: -p.amount_cents, type: 'pay', merchant: m.name, category: '购物',
           description: p.description || `向 ${m.name} 付款`, refType: 'merchant_payment', refId: p.id,
-          journalType: 'merchant_payment', contra: PAYABLE, contraUserId: m.id,
+          journalType: 'merchant_payment',
+          contra: useAutoSettle ? CLEARING_INCOME : PAYABLE,
+          contraUserId: useAutoSettle ? undefined : m.id,
         });
+        if (useAutoSettle) {
+          wallet.applyCash(db, {
+            userId: m.owner_user_id, delta: p.amount_cents, type: 'sale', counterparty: req.user.email,
+            merchant: m.name, category: '经营收入',
+            description: `收款：${p.reference}${p.description ? ' · ' + p.description : ''}`,
+            refType: 'merchant_payment', refId: p.id,
+            journalType: 'merchant_settlement', contra: CLEARING_INCOME,
+          });
+        }
         db.prepare('UPDATE merchant_payments SET transaction_id = ? WHERE id = ?').run(mv.transactionId, p.id);
         return mv;
       });
@@ -434,8 +502,19 @@ module.exports = function mountMerchant(app, ctx) {
     if (remaining <= 0) throw badRequest('REFUND_EXCEEDS_REMAINING', '该支付已全额退款');
     if (!Number.isInteger(amountCents) || amountCents <= 0) throw badRequest('AMOUNT_INVALID', '退款金额格式不正确');
     if (amountCents > remaining) throw badRequest('REFUND_EXCEEDS_REMAINING', `退款金额超过可退余额：最多可退 ${fmt(remaining)}`, { refundable_cents: remaining });
-    const available = payableOf(merchant.id);
-    if (available < amountCents) throw badRequest('INSUFFICIENT_MERCHANT_BALANCE', `商户可结算余额不足，当前 ${fmt(available)}`);
+    // 即时结算的订单，钱在商户所有者钱包里，退款要从钱包扣回；待结算订单则从 merchant:payable 扣。
+    const isAutoSettled = payment.settle_mode === 'auto';
+    const ownerId = merchant.owner_user_id;
+    if (isAutoSettled) {
+      if (!ownerId) throw badRequest('MERCHANT_ACCOUNT_MISSING', '该商户尚未绑定所有者账户，无法退款');
+      const walletBalance = wallet.balanceOf(db, ownerId);
+      if (walletBalance < amountCents) {
+        throw badRequest('INSUFFICIENT_MERCHANT_BALANCE', `商户账户可用余额不足，需要 ${fmt(amountCents)}，当前 ${fmt(walletBalance)}`, { available_cents: walletBalance });
+      }
+    } else {
+      const available = payableOf(merchant.id);
+      if (available < amountCents) throw badRequest('INSUFFICIENT_MERCHANT_BALANCE', `商户可结算余额不足，当前 ${fmt(available)}`);
+    }
     const nextStatus = payment.refunded_cents + amountCents === payment.amount_cents ? 'REFUNDED' : 'PARTIALLY_REFUNDED';
     state.assertTransition('merchant_payment', payment.status, nextStatus);
     const out = withTransaction(() => {
@@ -445,7 +524,29 @@ module.exports = function mountMerchant(app, ctx) {
       const rf = db.prepare('INSERT INTO merchant_refunds (payment_id, merchant_id, amount_cents, reason, status, created_at) VALUES (?,?,?,?,?,?)')
         .run(payment.id, merchant.id, amountCents, reason || null, 'SUCCEEDED', now());
       let mv = null;
-      if (payment.customer_user_id) {
+      if (isAutoSettled && ownerId) {
+        // 即时结算：先从商户所有者钱包扣回，再退回付款人；无付款人时退到平台外部科目。
+        wallet.applyCash(db, {
+          userId: ownerId, delta: -amountCents, type: 'merchant_refund_out', merchant: merchant.name, category: '退款支出',
+          description: `退款支出：支付 #${payment.id}${reason ? ' · ' + reason : ''}`,
+          refType: 'merchant_refund', refId: rf.lastInsertRowid, journalType: 'merchant_refund', contra: CLEARING_INCOME,
+        });
+        if (payment.customer_user_id) {
+          mv = wallet.applyCash(db, {
+            userId: payment.customer_user_id, delta: amountCents, type: 'refund', merchant: merchant.name, category: '退款',
+            description: `${merchant.name} 退款（支付 #${payment.id}）${reason ? '：' + reason : ''}`,
+            refType: 'merchant_refund', refId: rf.lastInsertRowid, journalType: 'merchant_refund', contra: CLEARING_INCOME,
+          });
+          db.prepare('UPDATE merchant_refunds SET transaction_id = ? WHERE id = ?').run(mv.transactionId, rf.lastInsertRowid);
+          if (payment.transaction_id) db.prepare('UPDATE transactions SET status = ? WHERE id = ?').run(nextStatus, payment.transaction_id);
+        } else {
+          ledger.post(db, {
+            journalType: 'merchant_refund', refType: 'merchant_payment', refId: payment.id,
+            entries: [{ account: CLEARING_INCOME, amount_cents: -amountCents }, { account: 'external:merchants', amount_cents: amountCents }],
+            memo: `支付 #${payment.id} 退款（付款人已注销，商户账户已扣回）`,
+          });
+        }
+      } else if (payment.customer_user_id) {
         mv = wallet.applyCash(db, {
           userId: payment.customer_user_id, delta: amountCents, type: 'refund', merchant: merchant.name, category: '退款',
           description: `${merchant.name} 退款（支付 #${payment.id}）${reason ? '：' + reason : ''}`,
@@ -473,9 +574,17 @@ module.exports = function mountMerchant(app, ctx) {
   }
 
   function balanceView(merchantId) {
+    const m = db.prepare('SELECT owner_user_id, settlement_mode FROM merchants WHERE id = ?').get(merchantId);
+    const mode = m && m.settlement_mode === 'manual' ? 'manual' : 'auto';
+    const walletCents = m && m.owner_user_id ? wallet.balanceOf(db, m.owner_user_id) : 0;
+    const payable = payableOf(merchantId);
+    const pending = pendingPayoutOf(merchantId);
     return {
-      available_cents: payableOf(merchantId), available: money.centsToDecimal(payableOf(merchantId)),
-      pending_payout_cents: pendingPayoutOf(merchantId), pending_payout: money.centsToDecimal(pendingPayoutOf(merchantId)),
+      // available = 待结算余额（manual 模式下的收款）；auto 模式下收款已即时进入 wallet。
+      available_cents: payable, available: money.centsToDecimal(payable),
+      pending_payout_cents: pending, pending_payout: money.centsToDecimal(pending),
+      settlement_mode: mode,
+      wallet_cents: walletCents, wallet: money.centsToDecimal(walletCents),
       currency: 'USD',
     };
   }
@@ -541,8 +650,14 @@ module.exports = function mountMerchant(app, ctx) {
     const website = b.website !== undefined ? validateUrl(b.website) : (req.merchant.website || '');
     const description = b.description !== undefined ? v.str(b, 'description', { max: 300, label: '商户简介' }) : (req.merchant.description || '');
     const webhookUrl = b.webhook_url !== undefined ? validateWebhookUrl(b.webhook_url) : (req.merchant.webhook_url || '');
-    db.prepare('UPDATE merchants SET name = ?, website = ?, description = ?, webhook_url = ?, updated_at = ? WHERE id = ?')
-      .run(name, website || null, description || null, webhookUrl || null, now(), req.merchant.id);
+    const currentMode = req.merchant.settlement_mode === 'manual' ? 'manual' : 'auto';
+    const settlementMode = b.settlement_mode !== undefined ? v.oneOf(String(b.settlement_mode), SETTLE_MODES, '收款结算方式') : currentMode;
+    if (settlementMode === 'auto' && !req.merchant.owner_user_id) throw badRequest('MERCHANT_ACCOUNT_MISSING', '该商户未绑定所有者账户，只能使用待结算模式');
+    db.prepare('UPDATE merchants SET name = ?, website = ?, description = ?, webhook_url = ?, settlement_mode = ?, updated_at = ? WHERE id = ?')
+      .run(name, website || null, description || null, webhookUrl || null, settlementMode, now(), req.merchant.id);
+    if (settlementMode !== currentMode) {
+      oplog.record(db, req, { action: 'merchant.settlement_mode', target_type: 'merchant', target_id: req.merchant.id, reason: `${currentMode} → ${settlementMode}` });
+    }
     res.json({ ok: true, message: '商户资料已更新', merchant: merchantView(db.prepare('SELECT * FROM merchants WHERE id = ?').get(req.merchant.id)) });
   });
 

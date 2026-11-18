@@ -23,7 +23,7 @@
   <main class="doc-main">
     <article class="doc-article">
       <h1>创建支付</h1>
-      <p class="lede">创建一笔支付单并拿到结账链接。支付单在 30 分钟内有效；付款人完成支付后，你会收到 <code>payment.succeeded</code> Webhook。</p>
+      <p class="lede">创建一笔支付单，拿到结账链接和收款二维码。支付单在 30 分钟内有效；付款人完成支付后，你会收到 <code>payment.succeeded</code> Webhook。</p>
 
       <div class="endpoint"><span class="method post">POST</span><span class="path">/api/v1/payments</span><span class="note">需要 API Key</span></div>
 
@@ -110,6 +110,9 @@ const { payment } = await resp.json();</pre>
           <tr><td><code>payment.refundable_cents</code></td><td>剩余可退金额（分）</td></tr>
           <tr><td><code>payment.metadata</code></td><td>创建时传入的自定义数据</td></tr>
           <tr><td><code>payment.checkout_url</code></td><td>付款人结账地址，交给浏览器打开</td></tr>
+          <tr><td><code>payment.qr</code></td><td>收款二维码信息：<code>payload</code>（结账链接）、<code>svg_url</code>（图片地址）、<code>json_url</code>。见 <a href="/docs/qr">收款二维码</a></td></tr>
+          <tr><td><code>payment.qr_svg</code></td><td>二维码 SVG 字符串，可直接内联到自己的页面或存成文件；只在创建支付与查询单笔支付时返回</td></tr>
+          <tr><td><code>payment.settle_mode</code></td><td>这笔款的到账方式：<code>auto</code> 即时到账商户账户、<code>manual</code> 待结算；未支付时为 <code>null</code>。见 <a href="/docs/settlement">结算余额与提现</a></td></tr>
           <tr><td><code>payment.created_at</code></td><td>创建时间（毫秒时间戳）</td></tr>
           <tr><td><code>payment.paid_at</code></td><td>付款时间；未支付时为 <code>null</code></td></tr>
           <tr><td><code>payment.expires_at</code></td><td>过期时间（创建后 30 分钟）</td></tr>
@@ -138,6 +141,13 @@ const { payment } = await resp.json();</pre>
         <li><b>reference</b>：适合作为业务侧去重键。相同订单号且金额一致时返回同一笔支付，不会重复创建。</li>
       </ul>
       <p>两者可以同时使用：<code>Idempotency-Key</code> 保证单次请求的传输安全，<code>reference</code> 保证业务订单唯一。</p>
+
+      <h2 id="qr">收款二维码</h2>
+      <p>响应里的 <code>payment.qr_svg</code> 和 <code>payment.qr.svg_url</code> 可以直接用在你的收银台或小票上，顾客用相机扫一下就能付款。完整说明（尺寸参数、内联示例、可用的地址格式）见 <a href="/docs/qr">收款二维码</a>。</p>
+      <div class="codeblock">
+        <div class="code-head"><div class="lang-tabs"><button class="active" data-lang="html">HTML</button></div><button class="copy">复制</button></div>
+<pre data-lang="html">&lt;img src="https://your-domain/api/checkout/AbCdEfGh…/qr.svg?size=320" width="320" height="320" alt="扫码付款"&gt;</pre>
+      </div>
 
       <h2 id="notes">注意事项</h2>
       <ul>

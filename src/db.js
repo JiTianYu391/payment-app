@@ -95,10 +95,10 @@ const COLUMN_DEFAULTS = {
   confirm_tokens: { used_at: null },
   notifications: { read_at: null, ref_type: null, ref_id: null },
   refund_requests: { status: 'PENDING', reviewed_by: null, review_note: null, reviewed_at: null, refund_id: null },
-  merchants: { owner_user_id: null, status: 'ACTIVE', website: null, description: null, webhook_url: null, webhook_secret: null },
+  merchants: { owner_user_id: null, status: 'ACTIVE', website: null, description: null, webhook_url: null, webhook_secret: null, settlement_mode: 'auto' },
   merchant_keys: { label: null, mode: 'live', last_used_at: null, revoked_at: null },
   merchant_payments: { refunded_cents: 0, status: 'CREATED', currency: 'USD', customer_email: null, customer_user_id: null,
-    description: null, metadata_json: null, checkout_token: null, paid_at: null, transaction_id: null,
+    description: null, metadata_json: null, checkout_token: null, settle_mode: null, paid_at: null, transaction_id: null,
     success_url: null, cancel_url: null },
   merchant_refunds: { reason: null, status: 'SUCCEEDED' },
   merchant_payouts: { status: 'PENDING', destination: null, reviewed_by: null, review_note: null, reviewed_at: null },
@@ -336,6 +336,8 @@ CREATE INDEX IF NOT EXISTS idx_session_token ON sessions(token_hash);
     "ALTER TABLE transactions ADD COLUMN status TEXT NOT NULL DEFAULT 'SUCCEEDED'",
     'ALTER TABLE transactions ADD COLUMN ref_type TEXT',
     'ALTER TABLE transactions ADD COLUMN ref_id INTEGER',
+    "ALTER TABLE merchants ADD COLUMN settlement_mode TEXT NOT NULL DEFAULT 'auto'",
+    'ALTER TABLE merchant_payments ADD COLUMN settle_mode TEXT',
   ]) {
     try { db.exec(ddl); } catch (_) { /* 列已存在 */ }
   }
@@ -473,6 +475,7 @@ CREATE TABLE IF NOT EXISTS merchants (
   description TEXT,
   webhook_url TEXT,
   webhook_secret TEXT,
+  settlement_mode TEXT NOT NULL DEFAULT 'auto',
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );
@@ -501,6 +504,7 @@ CREATE TABLE IF NOT EXISTS merchant_payments (
   success_url TEXT,
   cancel_url TEXT,
   checkout_token TEXT UNIQUE,
+  settle_mode TEXT,
   refunded_cents INTEGER NOT NULL DEFAULT 0 CHECK (refunded_cents >= 0 AND refunded_cents <= amount_cents),
   transaction_id INTEGER,
   created_at INTEGER NOT NULL,

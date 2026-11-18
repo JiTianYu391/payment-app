@@ -153,6 +153,7 @@ button { -webkit-tap-highlight-color: transparent; }
 .pill.up { background: var(--success-bg); color: var(--success); }
 .pill.down { background: var(--danger-bg); color: var(--danger); }
 .actions { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-3); margin-top: var(--space-5); padding-top: var(--space-5); border-top: 1px solid var(--border); }
+.hero .actions { grid-template-columns: repeat(5, minmax(0, 1fr)); }
 .action { display: flex; flex-direction: column; align-items: center; gap: var(--space-2); min-height: 44px; padding: 0; border: 0; background: none; color: var(--text-1); font: inherit; font-size: var(--text-sm); cursor: pointer; }
 .action-icon { display: inline-flex; align-items: center; justify-content: center; width: 48px; height: 48px; border-radius: 50%; background: var(--brand-soft); color: var(--brand); transition: transform .15s var(--ease), background .15s; }
 .action.primary .action-icon { background: var(--brand); color: var(--on-brand); }
@@ -370,6 +371,19 @@ details.defs ul { margin: var(--space-2) 0 0; padding-left: var(--space-4); }
 
 /* PIN 与密码输入 */
 .pin-input { height: 52px; text-align: center; font-family: var(--font-mono); font-size: 24px; letter-spacing: .6em; padding-left: .6em; }
+
+/* 支付 PIN：透明输入框覆盖在 6 个格子上（见 public/pin.js）。
+   数字键盘、粘贴、密码管理器都按原生行为工作，格子只负责显示，不进假焦点。 */
+.pin-field { position: relative; width: 100%; }
+.pin-boxes { display: flex; gap: var(--space-2); }
+.pin-cell { flex: 1 1 0; min-width: 0; height: 52px; display: flex; align-items: center; justify-content: center; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--surface); color: var(--text-1); font-family: var(--font-mono); font-size: 18px; line-height: 1; transition: border-color .15s var(--ease), box-shadow .15s var(--ease); }
+.pin-field.focused .pin-cell.active { border-color: var(--brand); box-shadow: var(--focus); }
+.pin-cell.filled { border-color: color-mix(in srgb, var(--brand) 45%, var(--border-strong)); }
+.pin-field.has-error .pin-cell { border-color: var(--danger); }
+.pin-field.shake { animation: pin-shake .4s var(--ease); }
+@keyframes pin-shake { 0%, 100% { transform: translateX(0); } 20% { transform: translateX(-6px); } 40% { transform: translateX(6px); } 60% { transform: translateX(-4px); } 80% { transform: translateX(4px); } }
+@media (prefers-reduced-motion: reduce) { .pin-field.shake { animation: none; } }
+input[data-pin-ready] { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; padding: 0; border: 0; background: transparent; color: transparent; caret-color: transparent; font-size: 16px; opacity: 0; letter-spacing: 0; }
 .pw-wrap { position: relative; }
 .pw-wrap input { padding-right: 64px; }
 .pw-toggle { position: absolute; right: 4px; top: 4px; height: calc(var(--control-h) - 8px); padding: 0 var(--space-3); border: 0; border-radius: 4px; background: none; color: var(--brand); font: inherit; font-size: var(--text-sm); font-weight: var(--weight-medium); cursor: pointer; }
@@ -457,6 +471,9 @@ details.defs ul { margin: var(--space-2) 0 0; padding-left: var(--space-4); }
 .tab-item.cta { color: var(--text-1); }
 .tab-item.cta .cta-circle { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; margin-top: -14px; border-radius: 50%; background: var(--brand); color: var(--on-brand); box-shadow: 0 4px 12px color-mix(in srgb, var(--brand) 35%, transparent); }
 
+/* 运营后台横向标签：只在窄屏出现（桌面端侧栏已有完整入口） */
+.console-tabs { display: none; }
+
 /* ---------- 响应式 ---------- */
 @media (max-width: 1100px) {
   .kpis, .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -481,6 +498,10 @@ details.defs ul { margin: var(--space-2) 0 0; padding-left: var(--space-4); }
   .toolbar-left > *, .toolbar-right > * { flex: 1 1 auto; }
   .search-wrap { flex-basis: 100%; }
   .toolbar .search { width: 100%; }
+  .console-tabs { display: flex; gap: var(--space-2); margin: 0 calc(-1 * var(--space-4)) var(--space-3); padding: 0 var(--space-4); overflow-x: auto; scrollbar-width: none; }
+  .console-tabs::-webkit-scrollbar { display: none; }
+  .console-tab { flex: none; height: 34px; padding: 0 var(--space-3); border: 1px solid var(--border); border-radius: 999px; background: var(--surface); color: var(--text-2); font: inherit; font-size: var(--text-sm); cursor: pointer; }
+  .console-tab.active { background: var(--brand); border-color: var(--brand); color: var(--on-brand); font-weight: var(--weight-medium); }
   .tabbar { display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 40; height: calc(var(--tabbar-h) + var(--safe-bottom)); padding: var(--space-1) var(--space-2) var(--safe-bottom); background: color-mix(in srgb, var(--surface) 92%, transparent); backdrop-filter: saturate(180%) blur(12px); -webkit-backdrop-filter: saturate(180%) blur(12px); border-top: 1px solid var(--border); }
   .toast { bottom: calc(var(--tabbar-h) + var(--safe-bottom) + var(--space-3)); }
   .hero { padding: var(--space-4); }

@@ -93,6 +93,19 @@ const STATUS = {
 const W_STATUS = { PENDING: ['待审核', 'warning'], SUCCEEDED: ['已出款', 'success'], FAILED: ['已驳回', 'danger'] };
 const U_STATUS = { ACTIVE: ['正常', 'success'], FROZEN: ['已冻结', 'danger'] };
 const ROLE_LABEL = { customer: '用户', viewer: '只读访客', finance: '财务', admin: '管理员' };
+// 运营后台板块：桌面端渲染在侧栏，手机端渲染成底部标签栏入口 + 横向标签 + 「我的」里的菜单。
+const CONSOLE_VIEWS = [
+  ['c-overview', '概览', 'layout-dashboard', '用户、余额与资金净流入总览'],
+  ['c-tx', '交易', 'receipt', '全平台流水，可按用户邮箱搜索'],
+  ['c-payments', '支付与退款', 'credit-card', '支付单与后台发起退款'],
+  ['c-refunds', '退款申请', 'undo-2', '处理用户提交的退款申请'],
+  ['c-merchants', '商户', 'shopping-bag', '入驻审批、暂停与恢复'],
+  ['c-payouts', '商户结算', 'banknote', '商户结算提现审核'],
+  ['c-withdrawals', '提现审核', 'landmark', '用户提现审核与出款'],
+  ['c-users', '用户', 'users', '冻结账户、调整角色'],
+  ['c-recon', '对账', 'scale', '账本与余额一致性检查'],
+  ['c-logs', '操作日志', 'file-text', '运营与资金关键操作记录'],
+];
 const AUDIT_LABEL = {
   register: '注册', login: '登录', login_failed: '登录失败', logout: '退出登录', set_pin: '设置 PIN', change_pin: '修改 PIN',
   change_password: '修改密码', pin_failed: 'PIN 验证失败', transfer: '转账', pay: '付款', topup: '充值', withdrawal: '申请提现',
@@ -321,6 +334,7 @@ function enterApp() {
   const staff = can('console.read');
   $('consoleNav').hidden = !staff;
   $('roleLabel').textContent = ROLE_LABEL[me.role] || me.role;
+  renderConsoleEntry(staff);
   api('/api/health').then((h) => { if (h.invest && h.invest.simulated_day) { simDay = h.invest.simulated_day; $('simDay').innerHTML = icon('clock', 14) + '模拟日 day-' + simDay; } });
   loadNotifications();
   let v = (location.hash || '').slice(1);
@@ -328,12 +342,38 @@ function enterApp() {
   if (v === 'transfer') { showView('home'); return openTransfer(); }
   showView(v && $('view-' + v) && (!v.startsWith('c-') || staff) ? v : 'home');
 }
+// 运营后台入口：手机端侧栏隐藏，所以把入口同时放到「我的」菜单里
+function renderConsoleEntry(staff) {
+  const tab = $('consoleTab');
+  if (tab) tab.hidden = !staff;
+  const menu = $('consoleMenu');
+  const list = $('consoleMenuList');
+  if (!menu || !list) return;
+  menu.hidden = !staff;
+  if (!staff) { list.innerHTML = ''; return; }
+  list.innerHTML = CONSOLE_VIEWS.map(([view, label, icon, sub]) =>
+    `<li><button class="list-row" onclick="showView('${view}')"><span class="row-icon"><i data-icon="${icon}" data-size="18"></i></span><span class="row-main"><span class="row-title">${label}</span><span class="row-sub">${sub}</span></span><i data-icon="chevron-right" data-size="18" class="row-chevron"></i></button></li>`).join('');
+  hydrateIcons(list);
+}
+
 function showView(v) {
   if (v === 'wallet') v = 'activity';
   currentView = v;
   document.querySelectorAll('.nav-item, .tab-item').forEach((b) => b.classList.toggle('active', b.dataset.view === v));
   document.querySelectorAll('.view').forEach((s) => (s.hidden = s.id !== 'view-' + v));
   $('main').classList.toggle('wide', v.startsWith('c-'));
+  const consoleTabs = $('consoleTabs');
+  const inConsole = v.startsWith('c-') && can('console.read');
+  if (consoleTabs) {
+    consoleTabs.hidden = !inConsole;
+    if (inConsole && !consoleTabs.childElementCount) {
+      consoleTabs.innerHTML = CONSOLE_VIEWS.map(([view, label]) =>
+        `<button class="console-tab" data-view="${view}" onclick="showView('${view}')">${label}</button>`).join('');
+    }
+    consoleTabs.querySelectorAll('.console-tab').forEach((b) => b.classList.toggle('active', b.dataset.view === v));
+  }
+  const cTab = $('consoleTab');
+  if (cTab) cTab.classList.toggle('active', inConsole);
   if (location.hash.slice(1) !== v) history.replaceState(null, '', '#' + v);
   window.scrollTo(0, 0);
   refreshCurrent();
@@ -505,13 +545,17 @@ async function loadActivity() {
   }
 }
 
+// 资金表单 → 对应的 PIN 输入框（提交失败时抖动并清空，用户可直接重输）
+const PIN_FIELD = { transfer: 'trPin', pay: 'payPin', withdraw: 'wdPin', order: 'reviewPin', rebalance: 'rebPin' };
+function shakePinOf(form) { const id = PIN_FIELD[form]; if (id && window.pinShake) window.pinShake(id); }
+
 async function moneyAction(form, path, body, msgId, btnId, modalId) {
   const btn = btnId && $(btnId);
   if (btn) btn.disabled = true;
   const j = await submitConfirmed(path, body, keyFor(form));
   if (btn) btn.disabled = false;
   if (j.cancelled) return null;
-  if (!j.ok) { msg(msgId, errText(j), true); return null; }
+  if (!j.ok) { msg(msgId, errText(j), true); shakePinOf(form); return null; }
   resetKey(form);
   msg(msgId, '');
   closeModal(modalId);
@@ -525,6 +569,8 @@ async function refreshAvail(id, suffix) {
   $(id).textContent = `可用余额 ${walletBalance === null ? '—' : cents(walletBalance)}${suffix || ''}`;
 }
 function openTransfer() { msg('trMsg', ''); openSheet('transferModal'); refreshAvail('trAvail'); }
+// 扫一扫：独立页面（相机 + 解码），扫到后直接跳到付款页
+function openScan() { location.href = '/scan.html'; }
 function openWithdraw() { msg('wdMsg', ''); openSheet('withdrawModal'); refreshAvail('wdAvail', '　单笔上限 $500.00'); }
 function doTopup() {
   return moneyAction('topup', '/api/topup', { amount: $('topupAmount').value.trim() }, 'topupMsg', null, 'topupModal')
@@ -852,6 +898,7 @@ async function confirmOrder() {
   const btn = $('confirmOrderBtn');
   btn.disabled = true;
   const j = await api('/api/orders', { method: 'POST', idemKey: curPreview.idempotency_key, body: { product_id: curPreview.product_id, side: curPreview.side, quantity_milli: curPreview.quantity_milli, pin: $('reviewPin').value.trim(), idempotency_key: curPreview.idempotency_key } });
+  if (!j.ok) window.pinShake && window.pinShake('reviewPin');
   btn.disabled = false;
   if (!j.ok) return msg('reviewMsg', errText(j), true);
   const o = j.duplicate ? j.order : j;
@@ -919,6 +966,7 @@ async function openRebalance() {
 async function executeRebalance() {
   const btn = $('rebExecBtn'); btn.disabled = true;
   const j = await api('/api/rebalance/execute', { method: 'POST', body: { pin: $('rebPin').value.trim() } });
+  if (!j.ok) window.pinShake && window.pinShake('rebPin');
   btn.disabled = false;
   if (!j.ok) return msg('rebMsg', errText(j), true);
   msg('rebMsg', j.message + '：' + j.results.map((r) => (r.skipped ? `${r.class} 跳过（${r.reason}）` : `${r.side === 'BUY' ? '买入' : '卖出'} ${r.name} ${cents(r.amount_cents)}`)).join('；'));
