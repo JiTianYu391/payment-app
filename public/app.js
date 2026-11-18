@@ -1344,7 +1344,7 @@ function reviewW(id, approve) {
 // ---------- 运营后台：商户 / 退款申请 / 商户结算 ----------
 const M_STATUS = { PENDING: ['待审核', 'warning'], ACTIVE: ['正常', 'success'], SUSPENDED: ['已暂停', 'danger'], REJECTED: ['已拒绝', ''] };
 const RR_STATUS = { PENDING: ['待审核', 'warning'], APPROVED: ['已通过', 'success'], REJECTED: ['已驳回', 'danger'] };
-const MPO_STATUS = { PENDING: ['待审核', 'warning'], SUCCEEDED: ['已出款', 'success'], FAILED: ['已驳回', 'danger'], CANCELED: ['已撤销', ''] };
+const MPO_STATUS = { PENDING: ['待审核', 'warning'], SUCCEEDED: ['已到账', 'success'], FAILED: ['已驳回', 'danger'], CANCELED: ['已撤销', ''] };
 
 let merchantFilter = 'PENDING';
 let merchantsCache = [];

@@ -38,6 +38,25 @@ v4.1 之前，商户收的钱都记在 `merchant:payable`（可结算余额）�
 - 对账计入结转金额（`settled_to_wallet_cents`），避免 `merchant:payable` 与预期对不上；
 - 老支付单回填 `settle_mode='manual'`，字段不再留空。
 
+### 资金不再「丢出系统」
+
+原来两处出款都会把资金记到 `external:*` 科目，界面上等于凭空消失：
+
+- **商户结算审核通过**：改为计入商户所有者的账户余额（`wallet.applyCash`，`journalType=merchant_payout_paid`，
+  对手科目 `clearing:merchant_payouts`）。manual 模式于是变成「收款先进待结算 → 运营审核 → 转入账户」，
+  任何一步钱都在账上。
+- **退款资金来源**：auto 订单从账户余额扣；manual 订单优先从可结算余额扣，不足时回落到账户余额 ——
+  钱到了账户也不会出现「退不了款」。
+- 用户提现仍会出款到银行卡（系统外），但保留完整的提现记录（状态 / 尾号 / 审核时间 / 备注 / 可撤销），
+  文案不再用「模拟出款」，改为「出款到银行卡」。
+
+### 旧存档兼容
+
+- 启动时 `backfillMerchantSettleMode()` 把 v4.1 之前（`settle_mode` 为空）的已收款单回填为 `manual`，幂等；
+- 对账只统计 `settle_mode != 'auto'` 的支付单，并扣除已结转金额，历史 `external:*` 分录不影响校验；
+- 新增 `test/integration/merchant-legacy.js`（SQLite / JSON 各跑一遍）：造一条 v4.0 形态的历史数据，
+  验证回填、对账通过、历史单仍可退款。
+
 ### 支付 PIN 输入重做
 
 原来是一个输入框靠 `letter-spacing` 撑开。现在升级成「6 个视觉格子 + 一个覆盖在上面的透明输入框」，

@@ -18,7 +18,7 @@
 <script>try { var t = localStorage.getItem('spacepay_theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}</script>
 </head>
 <body>
-<div class="env-bar" role="note">虚拟资金 · 模拟价格 · 提现为模拟出款</div>
+<div class="env-bar" role="note">虚拟资金 · 模拟行情 · 不接入真实银行卡</div>
 <div class="net-bar" id="netBar" role="status" hidden><i data-icon="wifi-off" data-size="16"></i>网络已断开，恢复后自动刷新</div>
 
 <header class="topbar">
@@ -359,7 +359,7 @@
       <div class="card">
         <div class="tabs" role="tablist" id="cpoTabs">
           <button class="tab active" data-s="PENDING" onclick="setMerchantPayoutStatus('PENDING')">待审核</button>
-          <button class="tab" data-s="SUCCEEDED" onclick="setMerchantPayoutStatus('SUCCEEDED')">已出款</button>
+          <button class="tab" data-s="SUCCEEDED" onclick="setMerchantPayoutStatus('SUCCEEDED')">已到账</button>
           <button class="tab" data-s="FAILED" onclick="setMerchantPayoutStatus('FAILED')">已驳回</button>
           <button class="tab" data-s="" onclick="setMerchantPayoutStatus('')">全部</button>
         </div>
@@ -464,7 +464,7 @@
 
 <div id="withdrawModal" class="modal" hidden><form class="modal-card" onsubmit="event.preventDefault(); doWithdraw()">
   <div class="sheet-handle"></div>
-  <div class="modal-head"><div><h2>提现</h2><p class="hint">模拟出款，提交后由财务审核</p></div><button type="button" class="close" onclick="closeModal('withdrawModal')" aria-label="关闭"><i data-icon="x" data-size="18"></i></button></div>
+  <div class="modal-head"><div><h2>提现</h2><p class="hint">出款到银行卡，提交后由财务审核</p></div><button type="button" class="close" onclick="closeModal('withdrawModal')" aria-label="关闭"><i data-icon="x" data-size="18"></i></button></div>
   <div class="modal-body">
     <div class="amount-field"><span class="cur">$</span><input id="wdAmount" inputmode="decimal" placeholder="0.00" aria-label="金额" autocomplete="off"></div>
     <p class="amount-meta" id="wdAvail">可用余额 —　单笔上限 $500.00</p>

@@ -293,7 +293,7 @@ module.exports = function mountAdmin(app, { db, backend, withTransaction, auth, 
       const owner = db.prepare('SELECT email FROM users WHERE id = ?').get(w.user_id) || {};
       if (!requireConfirmation(req, res, {
         action, params: { id, reason },
-        summary: { title: approve ? '确认批准提现' : '确认驳回提现', lines: [['申请编号', `#${w.id}`], ['申请用户', owner.email || '—'], ['金额', fmt(w.amount_cents)], ['收款账户', `尾号 ${w.destination}`], ['处理结果', approve ? '批准：模拟出款，资金离开平台' : '驳回：资金退回用户钱包'], ['备注', reason || '—']] },
+        summary: { title: approve ? '确认批准提现' : '确认驳回提现', lines: [['申请编号', `#${w.id}`], ['申请用户', owner.email || '—'], ['金额', fmt(w.amount_cents)], ['收款账户', `尾号 ${w.destination}`], ['处理结果', approve ? '批准：出款到银行卡（不接入真实银行，仅记账）' : '驳回：资金退回用户钱包'], ['备注', reason || '—']] },
       })) return;
       withTransaction(() => {
         const upd = db.prepare('UPDATE withdrawals SET status = ?, reviewed_by = ?, review_note = ?, reviewed_at = ?, updated_at = ? WHERE id = ? AND status = ?')

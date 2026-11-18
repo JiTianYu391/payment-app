@@ -125,7 +125,7 @@ function reconcile(db) {
   const wClearing = accountBalance(db, 'clearing:withdrawals');
   if (wClearing !== pendingCents) issues.push({ check: 'clearing_withdrawals_matches_pending', balance_cents: wClearing, pending_cents: pendingCents });
 
-  // 商户：待结算余额 = 结算模式为 manual 的成功支付 − 已退款 − 已出款。
+  // 商户：待结算余额 = 结算模式为 manual 的成功支付 − 已退款 − 已到账。
   // 即时结算（settle_mode='auto'）的钱已经进商户所有者钱包，不经过 merchant:payable，
   // 因此这里只统计 manual 支付单，否则 payable 会与预期永久对不上。
   const payableRows = db.prepare("SELECT user_id, SUM(amount_cents) AS s FROM ledger_entries WHERE account = 'merchant:payable' GROUP BY user_id").all();

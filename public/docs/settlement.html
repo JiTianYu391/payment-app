@@ -75,7 +75,7 @@ console.log(balance.available);</pre>
       <table class="doc-table">
         <thead><tr><th>字段</th><th>说明</th></tr></thead>
         <tbody>
-          <tr><td><code>available_cents</code></td><td>可结算余额 = 成功支付 − 已退款 − 已出款 − 审核中的提现。<b>即时到账模式下恒为 0</b></td></tr>
+          <tr><td><code>available_cents</code></td><td>可结算余额 = 成功支付 − 已退款 − 已到账 − 已结转 − 审核中的申请。<b>即时到账模式下恒为 0</b></td></tr>
           <tr><td><code>pending_payout_cents</code></td><td>已申请、等待审核的提现金额</td></tr>
           <tr><td><code>settlement_mode</code></td><td>当前到账方式：<code>auto</code> 即时到账 / <code>manual</code> 待结算</td></tr>
           <tr><td><code>wallet_cents</code></td><td>商户所有者账户的可用余额（即时到账的钱在这里）</td></tr>
@@ -97,9 +97,9 @@ console.log(balance.available);</pre>
       <h2 id="cancel-payout">撤销审核中的提现</h2>
       <p>提现申请提交后，这笔钱会从可结算余额转入在途科目（<code>clearing:merchant_payouts</code>）并冻结，直到财务处理。审核期间商户可以自己撤销，钱立刻退回可结算余额：</p>
       <div class="endpoint"><span class="method post">POST</span><span class="path">/api/merchant/payouts/:id/cancel</span><span class="note">仅 PENDING 状态可撤销</span></div>
-      <p>已出款或已被驳回的申请不能再撤销，返回 <code>409 INVALID_STATE_TRANSITION</code>。</p>
+      <p>已到账或已被驳回的申请不能再撤销，返回 <code>409 INVALID_STATE_TRANSITION</code>。</p>
 
-      <h2 id="create-payout">申请结算提现</h2>
+      <h2 id="create-payout">申请结算到账</h2>
       <div class="endpoint"><span class="method post">POST</span><span class="path">/api/v1/payouts</span><span class="note">需要 API Key</span></div>
       <table class="doc-table">
         <thead><tr><th>参数</th><th>类型</th><th>说明</th></tr></thead>
@@ -151,14 +151,15 @@ const data = await resp.json();</pre>
 }</pre>
       </div>
 
-      <h2 id="payout-status">提现状态</h2>
-      <div class="pillrow"><span class="st warn">PENDING</span><span class="st ok">SUCCEEDED</span><span class="st bad">FAILED</span></div>
+      <h2 id="payout-status">结算状态</h2>
+      <div class="pillrow"><span class="st warn">PENDING</span><span class="st ok">SUCCEEDED</span><span class="st bad">FAILED</span><span class="st">CANCELED</span></div>
       <table class="doc-table">
         <thead><tr><th>状态</th><th>说明</th></tr></thead>
         <tbody>
           <tr><td><code>PENDING</code></td><td>已提交，等待财务审核；金额已从可结算余额冻结</td></tr>
-          <tr><td><code>SUCCEEDED</code></td><td>审核通过，已出款（模拟）</td></tr>
+          <tr><td><code>SUCCEEDED</code></td><td>审核通过，款项已转入商户所有者的账户余额（不再离开系统）</td></tr>
           <tr><td><code>FAILED</code></td><td>审核驳回，金额退回可结算余额</td></tr>
+          <tr><td><code>CANCELED</code></td><td>商户在审核期间自行撤销，金额退回可结算余额</td></tr>
         </tbody>
       </table>
       <p>申请后金额立即从 <code>available_cents</code> 转入 <code>pending_payout_cents</code>，避免重复申请；驳回时自动退回。</p>

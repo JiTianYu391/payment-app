@@ -1,6 +1,6 @@
 /**
  * SpacePay 服务端入口（Express）。
- * 全部余额为虚拟资金，不接入真实支付渠道，提现为模拟出款。
+ * 全部余额为虚拟资金，不接入真实支付渠道；提现只记账出款，不会真的到银行卡。
  *
  * 结构：
  *   createApp()  组装中间件与路由，返回 { app, db, ... }，测试直接使用，不监听端口；
@@ -392,7 +392,7 @@ function createApp() {
   // ---------- 钱包 / 统计 ----------
   app.get('/api/wallet', auth, (req, res) => {
     const bal = wallet.balanceOf(db, req.user.id);
-    res.json({ ok: true, balance_cents: bal, balance: money.centsToDecimal(bal), currency: 'USD', virtual: true, notice: '虚拟资金；提现为模拟出款，不会到达真实银行账户' });
+    res.json({ ok: true, balance_cents: bal, balance: money.centsToDecimal(bal), currency: 'USD', virtual: true, notice: '虚拟资金；提现只记账，不会到达真实银行账户' });
   });
 
   // 收支统计：口径见 metrics.DEFINITIONS；可选 from / to（不传 = 全部历史）
@@ -569,7 +569,7 @@ function createApp() {
     res.json({ ok: true, message: '充值成功（虚拟资金）', balance_cents: mv.balance, transaction_id: mv.transactionId });
   });
 
-  // ---------- 提现（模拟出款，需财务审核） ----------
+  // ---------- 提现（出款到银行卡，需财务审核） ----------
   app.get('/api/withdrawals', auth, (req, res) => {
     const items = db.prepare('SELECT * FROM withdrawals WHERE user_id = ? ORDER BY id DESC LIMIT 100').all(req.user.id);
     res.json({ ok: true, items });
@@ -611,7 +611,7 @@ function createApp() {
     const params = { amount_cents: amountCents, destination };
     if (!requireConfirmation(req, res, {
       action: 'withdrawal.create', params,
-      summary: { title: '确认提现', lines: [['提现金额', fmt(amountCents)], ['收款账户', `尾号 ${destination}`], ['到账方式', '模拟出款，需财务审核'], ['提现后余额', fmt(bal - amountCents)]] },
+      summary: { title: '确认提现', lines: [['提现金额', fmt(amountCents)], ['收款账户', `尾号 ${destination}`], ['到账方式', '出款到银行卡，需财务审核'], ['提现后余额', fmt(bal - amountCents)]] },
     })) return;
     const r = withTransaction(() => {
       const w = db.prepare('INSERT INTO withdrawals (user_id, amount_cents, destination, status, created_at, updated_at) VALUES (?,?,?,?,?,?)')

@@ -16,7 +16,7 @@ const PAY_STATUS = {
   CREATED: ['待支付', 'warning'], SUCCEEDED: ['成功', 'success'], PARTIALLY_REFUNDED: ['部分退款', 'info'],
   REFUNDED: ['已退款', ''], FAILED: ['失败', 'danger'], CANCELED: ['已取消', ''], EXPIRED: ['已过期', ''],
 };
-const PO_STATUS = { PENDING: ['审核中', 'warning'], SUCCEEDED: ['已出款', 'success'], FAILED: ['已驳回', 'danger'], CANCELED: ['已撤销', ''] };
+const PO_STATUS = { PENDING: ['审核中', 'warning'], SUCCEEDED: ['已到账', 'success'], FAILED: ['已驳回', 'danger'], CANCELED: ['已撤销', ''] };
 const WH_STATUS = { PENDING: ['重试中', 'warning'], DELIVERED: ['已送达', 'success'], FAILED: ['失败', 'danger'] };
 function badge(map, key) { const [label, cls] = map[key] || [key || '—', '']; return `<span class="badge ${cls}">${esc(label)}</span>`; }
 
@@ -262,7 +262,7 @@ let payoutsCache = [];
 // 审核通过后钱到底去哪了：给每个状态一句人话
 const PO_WHERE = {
   PENDING: '这笔钱暂时冻结在「审核中」，财务处理后出款。你随时可以点「撤销」把它退回可结算余额。',
-  SUCCEEDED: '已出款到上面填写的收款账户。本环境为模拟出款，不会真的转到银行卡。',
+  SUCCEEDED: '已转入你的 SpacePay 账户余额，可以在「我的」里看到并使用这笔钱。',
   FAILED: '未出款，资金已退回你的可结算余额。',
   CANCELED: '你已撤销这笔申请，资金已退回你的可结算余额。',
 };

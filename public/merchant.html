@@ -134,7 +134,7 @@
       <div class="kpis">
         <div class="kpi"><div class="label">今日收款</div><div class="value" id="kToday">—</div><div class="note" id="kTodayNote">—</div></div>
         <div class="kpi"><div class="label">累计净收入</div><div class="value" id="kNet">—</div><div class="note" id="kGrossNote">—</div></div>
-        <div class="kpi"><div class="label">可结算余额</div><div class="value" id="kAvailable">—</div><div class="note">成功支付 − 退款 − 已出款</div></div>
+        <div class="kpi"><div class="label">可结算余额</div><div class="value" id="kAvailable">—</div><div class="note">成功支付 − 退款 − 已到账 − 已结转</div></div>
         <div class="kpi"><div class="label">待审核结算</div><div class="value" id="kPending">—</div><div class="note" id="kPendingNote">—</div></div>
       </div>
       <div class="grid2">
@@ -191,18 +191,18 @@
       </div>
       <div class="grid2">
         <div class="panel">
-          <div class="panel-head"><h2>申请提现到银行卡</h2></div>
+          <div class="panel-head"><h2>申请结算到账</h2></div>
           <div class="panel-body">
             <label class="field"><span>提现金额（USD）</span><input id="poAmount" inputmode="decimal" placeholder="0.00"></label>
-            <label class="field"><span>收款账户</span><input id="poDest" maxlength="80" placeholder="例如：招商银行 尾号 1234"></label>
+            <label class="field"><span>备注</span><input id="poDest" maxlength="80" placeholder="例如：9 月货款（选填）"></label>
             <div class="actions"><button class="btn primary" id="poSubmit">提交申请</button></div>
             <p class="msg" id="poMsg"></p>
-            <p class="hint">提交后这笔钱会暂时冻结（显示在「审核中」），等财务审核通过后出款；审核期间可以在右侧记录里点「撤销」退回。</p>
+            <p class="hint">提交后这笔钱会暂时冻结（显示在「审核中」），财务通过后转入你的账户余额；审核期间可以在右侧记录里点「撤销」退回。不着急的话，用上面「转到我的账户」可以立即到账。</p>
           </div>
         </div>
         <div class="panel">
           <div class="panel-head"><h2>结算记录</h2></div>
-          <div class="table-wrap"><table class="m"><thead><tr><th>编号</th><th>状态</th><th class="num">金额</th><th class="hide-s">收款账户</th><th class="hide-s">时间</th><th></th></tr></thead><tbody id="payoutsBody"></tbody></table></div>
+          <div class="table-wrap"><table class="m"><thead><tr><th>编号</th><th>状态</th><th class="num">金额</th><th class="hide-s">备注</th><th class="hide-s">时间</th><th></th></tr></thead><tbody id="payoutsBody"></tbody></table></div>
         </div>
       </div>
     </section>
@@ -244,7 +244,7 @@
           <label class="field"><span>收款到账方式</span>
             <select id="pfSettle">
               <option value="auto">即时到账 — 顾客付款后直接进入我的账户余额</option>
-              <option value="manual">待结算 — 先记入可结算余额，需申请结算提现</option>
+              <option value="manual">待结算 — 先记入可结算余额，需申请结算到账</option>
             </select>
             <small id="pfSettleHint">即时到账的钱在「我的 → 账户余额」，可以直接转账或提现；切换只影响之后的收款。</small>
           </label>

@@ -503,17 +503,28 @@ module.exports = function mountMerchant(app, ctx) {
     if (!Number.isInteger(amountCents) || amountCents <= 0) throw badRequest('AMOUNT_INVALID', '退款金额格式不正确');
     if (amountCents > remaining) throw badRequest('REFUND_EXCEEDS_REMAINING', `退款金额超过可退余额：最多可退 ${fmt(remaining)}`, { refundable_cents: remaining });
     // 即时结算的订单，钱在商户所有者钱包里，退款要从钱包扣回；待结算订单则从 merchant:payable 扣。
+    // 退款从哪出：
+    //   auto 订单的钱在商户账户余额里 → 从账户扣；
+    //   manual 订单优先从可结算余额扣；若这笔钱已经被审核转到账户（payable 不够），
+    //   再从账户余额扣，避免"钱到了账户反而退不了款"。
     const isAutoSettled = payment.settle_mode === 'auto';
     const ownerId = merchant.owner_user_id;
+    const payableAvailable = payableOf(merchant.id);
+    const walletAvailable = ownerId ? wallet.balanceOf(db, ownerId) : 0;
+    let source;
     if (isAutoSettled) {
       if (!ownerId) throw badRequest('MERCHANT_ACCOUNT_MISSING', '该商户尚未绑定所有者账户，无法退款');
-      const walletBalance = wallet.balanceOf(db, ownerId);
-      if (walletBalance < amountCents) {
-        throw badRequest('INSUFFICIENT_MERCHANT_BALANCE', `商户账户可用余额不足，需要 ${fmt(amountCents)}，当前 ${fmt(walletBalance)}`, { available_cents: walletBalance });
+      if (walletAvailable < amountCents) {
+        throw badRequest('INSUFFICIENT_MERCHANT_BALANCE', `商户账户可用余额不足，需要 ${fmt(amountCents)}，当前 ${fmt(walletAvailable)}`, { available_cents: walletAvailable });
       }
+      source = 'wallet';
+    } else if (payableAvailable >= amountCents) {
+      source = 'payable';
+    } else if (ownerId && walletAvailable >= amountCents) {
+      source = 'wallet';
     } else {
-      const available = payableOf(merchant.id);
-      if (available < amountCents) throw badRequest('INSUFFICIENT_MERCHANT_BALANCE', `商户可结算余额不足，当前 ${fmt(available)}`);
+      const best = Math.max(payableAvailable, walletAvailable);
+      throw badRequest('INSUFFICIENT_MERCHANT_BALANCE', `商户可用于退款的余额不足，需要 ${fmt(amountCents)}，可结算 ${fmt(payableAvailable)}、账户 ${fmt(walletAvailable)}`, { available_cents: best, payable_cents: payableAvailable, wallet_cents: walletAvailable });
     }
     const nextStatus = payment.refunded_cents + amountCents === payment.amount_cents ? 'REFUNDED' : 'PARTIALLY_REFUNDED';
     state.assertTransition('merchant_payment', payment.status, nextStatus);
@@ -524,7 +535,7 @@ module.exports = function mountMerchant(app, ctx) {
       const rf = db.prepare('INSERT INTO merchant_refunds (payment_id, merchant_id, amount_cents, reason, status, created_at) VALUES (?,?,?,?,?,?)')
         .run(payment.id, merchant.id, amountCents, reason || null, 'SUCCEEDED', now());
       let mv = null;
-      if (isAutoSettled && ownerId) {
+      if (source === 'wallet' && ownerId) {
         // 即时结算：先从商户所有者钱包扣回，再退回付款人；无付款人时退到平台外部科目。
         wallet.applyCash(db, {
           userId: ownerId, delta: -amountCents, type: 'merchant_refund_out', merchant: merchant.name, category: '退款支出',
@@ -925,25 +936,39 @@ module.exports = function mountMerchant(app, ctx) {
       const m = db.prepare('SELECT * FROM merchants WHERE id = ?').get(p.merchant_id);
       if (!m) throw notFound('MERCHANT_NOT_FOUND', '商户不存在');
       state.assertTransition('merchant_payout', p.status, approve ? 'SUCCEEDED' : 'FAILED');
+      if (approve && !m.owner_user_id) throw badRequest('MERCHANT_ACCOUNT_MISSING', '该商户未绑定所有者账户，无法把结算款打给它');
       if (!requireConfirmation(req, res, {
         action: approve ? 'merchant_payout.approve' : 'merchant_payout.reject', params: { id, reason },
-        summary: { title: approve ? '确认批准结算提现' : '确认驳回结算提现', lines: [['商户', m.name], ['金额', fmt(p.amount_cents)], ['收款账户', p.destination || '—'], ['结果', approve ? '批准：资金出款（模拟）' : '驳回：资金退回商户可结算余额']] },
+        summary: {
+          title: approve ? '确认批准结算到账' : '确认驳回结算申请',
+          lines: [['商户', m.name], ['金额', fmt(p.amount_cents)], ['备注', p.destination || '—'],
+            ['结果', approve ? '批准：款项转入商户的 SpacePay 账户余额' : '驳回：资金退回商户可结算余额']],
+        },
       })) return;
       withTransaction(() => {
         const upd = db.prepare('UPDATE merchant_payouts SET status = ?, reviewed_by = ?, review_note = ?, reviewed_at = ? WHERE id = ? AND status = ?')
           .run(approve ? 'SUCCEEDED' : 'FAILED', req.user.id, reason || null, now(), id, 'PENDING');
         if (!upd.changes) throw conflict('CONCURRENT_MODIFICATION', '该提现已被其他人处理，请刷新');
-        ledger.post(db, {
-          journalType: approve ? 'merchant_payout_paid' : 'merchant_payout_reversal', refType: 'merchant_payout', refId: id,
-          entries: approve
-            ? [{ account: PAYOUT_CLEARING, amount_cents: -p.amount_cents }, { account: 'external:merchant_payouts', amount_cents: p.amount_cents }]
-            : [{ account: PAYOUT_CLEARING, amount_cents: -p.amount_cents }, { account: PAYABLE, user_id: m.id, amount_cents: p.amount_cents }],
-          memo: `商户结算 #${id} ${approve ? '出款' : '驳回退回'}`,
-        });
+        if (approve) {
+          // 批准 = 钱进商户所有者的账户余额。本环境没有真实银行通道，
+          // 如果把钱记到 external 科目，商户在任何界面都看不到它，等于凭空消失。
+          wallet.applyCash(db, {
+            userId: m.owner_user_id, delta: p.amount_cents, type: 'settlement', merchant: m.name, category: '结算到账',
+            description: `${m.name} 结算到账（#${id}）${p.destination ? ' · ' + p.destination : ''}`,
+            refType: 'merchant_payout', refId: id,
+            journalType: 'merchant_payout_paid', contra: PAYOUT_CLEARING,
+          });
+        } else {
+          ledger.post(db, {
+            journalType: 'merchant_payout_reversal', refType: 'merchant_payout', refId: id,
+            entries: [{ account: PAYOUT_CLEARING, amount_cents: -p.amount_cents }, { account: PAYABLE, user_id: m.id, amount_cents: p.amount_cents }],
+            memo: `商户结算 #${id} 驳回退回`,
+          });
+        }
       });
-      if (m.owner_user_id) notify.push(db, { userId: m.owner_user_id, kind: 'payout', title: approve ? `结算提现已出款 ${fmt(p.amount_cents)}` : `结算提现被驳回 ${fmt(p.amount_cents)}`, body: reason || '', refType: 'merchant_payout', refId: id });
+      if (m.owner_user_id) notify.push(db, { userId: m.owner_user_id, kind: 'payout', title: approve ? `结算已到账 ${fmt(p.amount_cents)}` : `结算申请被驳回 ${fmt(p.amount_cents)}`, body: approve ? `已转入你的账户余额${reason ? '：' + reason : ''}` : (reason || ''), refType: 'merchant_payout', refId: id });
       oplog.record(db, req, { action: approve ? 'merchant.payout.approve' : 'merchant.payout.reject', target_type: 'merchant_payout', target_id: id, amount_cents: p.amount_cents, reason: reason || null });
-      res.json({ ok: true, message: approve ? '已批准出款' : '已驳回，资金退回商户余额', payout: payoutView(db.prepare('SELECT * FROM merchant_payouts WHERE id = ?').get(id)) });
+      res.json({ ok: true, message: approve ? `已批准，${fmt(p.amount_cents)} 已转入商户账户余额` : '已驳回，资金退回商户可结算余额', payout: payoutView(db.prepare('SELECT * FROM merchant_payouts WHERE id = ?').get(id)) });
     };
   }
   app.post('/api/admin/merchant-payouts/:id/approve', auth, requirePerm('merchant.payout.review'), reviewPayout(true));
