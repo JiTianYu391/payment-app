@@ -486,6 +486,17 @@
   <div class="modal-body"><dl class="kv" id="confirmBody"></dl><p class="hint" style="margin-top:var(--space-3)">请核对以上信息。确认后立即执行，并记入操作日志。确认有效期 5 分钟。</p><p class="msg" id="confirmMsg"></p></div>
   <div class="modal-foot"><button class="btn" onclick="cancelConfirm()">返回修改</button><button class="btn primary" id="confirmBtn" onclick="acceptConfirm()">确认</button></div></div></div>
 
+<!-- 通用 PIN 确认：替代 prompt()，复用 6 格 PIN 组件 -->
+<div id="pinPromptModal" class="modal" hidden><form class="modal-card" onsubmit="event.preventDefault(); submitPinPrompt()">
+  <div class="sheet-handle"></div>
+  <div class="modal-head"><div><h2 id="pinPromptTitle">确认支付 PIN</h2><p class="hint" id="pinPromptDesc">请输入 6 位支付 PIN</p></div><button type="button" class="close" onclick="cancelPinPrompt()" aria-label="关闭"><i data-icon="x" data-size="18"></i></button></div>
+  <div class="modal-body">
+    <label class="field"><span>支付 PIN</span><input id="pinPromptInput" type="password" inputmode="numeric" maxlength="6" autocomplete="off"></label>
+    <p class="msg" id="pinPromptMsg"></p>
+  </div>
+  <div class="modal-foot"><button type="button" class="btn" onclick="cancelPinPrompt()">取消</button><button class="btn primary" id="pinPromptBtn">确认</button></div>
+</form></div>
+
 <div id="opModal" class="modal" hidden><form class="modal-card" onsubmit="event.preventDefault(); submitOp()">
   <div class="sheet-handle"></div>
   <div class="modal-head"><h2 id="opTitle">操作</h2><button type="button" class="close" onclick="closeModal('opModal')" aria-label="关闭"><i data-icon="x" data-size="18"></i></button></div>

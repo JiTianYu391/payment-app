@@ -820,8 +820,42 @@ async function loadHoldings() {
       <td class="act">${fd.status === 'ACTIVE' ? `<button class="btn sm" onclick="breakFd(${fd.id})">提前支取</button>` : ''}</td></tr>`;
   }).join('');
 }
+// 通用 PIN 确认：返回 Promise<string|null>。替代 prompt()，复用 6 格 PIN 组件，
+// 错误时抖动并清空，和资金表单里的 PIN 体验保持一致。
+let pinPromptResolve = null;
+function requestPin({ title, desc } = {}) {
+  return new Promise((resolve) => {
+    pinPromptResolve = resolve;
+    $('pinPromptTitle').textContent = title || '确认支付 PIN';
+    $('pinPromptDesc').textContent = desc || '请输入 6 位支付 PIN';
+    msg('pinPromptMsg', '');
+    $('pinPromptInput').value = '';
+    $('pinPromptBtn').disabled = false;
+    openSheet('pinPromptModal');
+    setTimeout(() => $('pinPromptInput').focus(), 60);
+  });
+}
+function submitPinPrompt() {
+  const value = $('pinPromptInput').value.trim();
+  if (!/^\d{6}$/.test(value)) {
+    msg('pinPromptMsg', '请输入 6 位数字', true);
+    if (window.pinShake) window.pinShake('pinPromptInput');
+    return;
+  }
+  const resolve = pinPromptResolve;
+  pinPromptResolve = null;
+  closeModal('pinPromptModal');
+  if (resolve) resolve(value);
+}
+function cancelPinPrompt() {
+  const resolve = pinPromptResolve;
+  pinPromptResolve = null;
+  closeModal('pinPromptModal');
+  if (resolve) resolve(null);
+}
+
 async function breakFd(id) {
-  const pin = prompt('提前支取按已存天数计息。请输入 6 位支付 PIN 确认：');
+  const pin = await requestPin({ title: '提前支取定存', desc: '提前支取按已存天数计息，请输入 6 位支付 PIN 确认' });
   if (!pin) return;
   const j = await api('/api/fixed-deposits/' + id + '/break', { method: 'POST', body: { pin } });
   toast(j.ok ? `${j.message}：本金 ${cents(j.principal_cents)}，利息 ${cents(j.interest_cents)}` : errText(j), !j.ok);

@@ -202,7 +202,7 @@
         </div>
         <div class="panel">
           <div class="panel-head"><h2>结算记录</h2></div>
-          <div class="table-wrap"><table class="m"><thead><tr><th>编号</th><th>状态</th><th class="num">金额</th><th class="hide-s">时间</th><th></th></tr></thead><tbody id="payoutsBody"></tbody></table></div>
+          <div class="table-wrap"><table class="m"><thead><tr><th>编号</th><th>状态</th><th class="num">金额</th><th class="hide-s">收款账户</th><th class="hide-s">时间</th><th></th></tr></thead><tbody id="payoutsBody"></tbody></table></div>
         </div>
       </div>
     </section>
@@ -279,6 +279,12 @@
     <p class="msg" id="newKeyMsg"></p>
   </div>
   <div class="modal-foot"><button class="btn" data-close>取消</button><button class="btn primary" id="newKeyOk">创建</button></div>
+</div></div>
+
+<div class="modal" id="payoutDetailModal" hidden><div class="modal-card">
+  <div class="modal-head"><h2>结算详情</h2><button class="btn sm ghost" data-close>关闭</button></div>
+  <div class="modal-body"><dl class="kv" id="payoutDetailBody"></dl><p class="hint" id="payoutWhere" style="margin-top:12px"></p></div>
+  <div class="modal-foot"><button class="btn" data-close>关闭</button></div>
 </div></div>
 
 <div class="modal" id="payDetailModal" hidden><div class="modal-card">

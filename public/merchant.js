@@ -241,13 +241,16 @@ async function loadPayouts() {
   if (!r.ok) return toast(r.error || '加载失败');
   $('pBalance').textContent = cents(r.balance.available_cents);
   $('pPending').textContent = cents(r.balance.pending_payout_cents);
-  $('payoutsBody').innerHTML = r.items.length ? r.items.map((x) => {
-    // 审核中的申请可以自己撤销：钱会立刻退回可结算余额
-    const act = x.status === 'PENDING' ? `<button class="btn sm ghost" data-cancel="${x.numeric_id}">撤销</button>` : '—';
-    return `<tr><td class="mono">${esc(x.id)}</td><td>${badge(PO_STATUS, x.status)}</td><td class="num">${cents(x.amount_cents)}</td><td class="hide-s">${fmtTime(x.created_at)}</td><td class="act">${act}</td></tr>`;
+  payoutsCache = r.items || [];
+  $('payoutsBody').innerHTML = payoutsCache.length ? payoutsCache.map((x) => {
+    const canCancel = x.status === 'PENDING';
+    const act = `<button class="btn sm ghost" data-detail="${x.numeric_id}">详情</button>`
+      + (canCancel ? ` <button class="btn sm ghost" data-cancel="${x.numeric_id}">撤销</button>` : '');
+    return `<tr><td class="mono">${esc(x.id)}</td><td>${badge(PO_STATUS, x.status)}</td><td class="num">${cents(x.amount_cents)}</td><td class="hide-s">${esc(x.destination || '—')}</td><td class="hide-s">${fmtTime(x.created_at)}</td><td class="act">${act}</td></tr>`;
   }).join('')
-    : '<tr><td colspan="5" class="empty">还没有结算记录。</td></tr>';
+    : '<tr><td colspan="6" class="empty">还没有结算记录。</td></tr>';
   $('payoutsBody').querySelectorAll('[data-cancel]').forEach((b) => b.addEventListener('click', () => cancelPayout(Number(b.dataset.cancel))));
+  $('payoutsBody').querySelectorAll('[data-detail]').forEach((b) => b.addEventListener('click', () => openPayout(Number(b.dataset.detail))));
   // 有可结算余额时，给一条不经过财务审核的出路
   const hasAvailable = r.balance.available_cents > 0;
   $('settleToWalletBtn').hidden = !hasAvailable;
@@ -255,6 +258,29 @@ async function loadPayouts() {
   $('settleToWalletAmt').textContent = cents(r.balance.available_cents);
   msg('poMsg', '');
 }
+let payoutsCache = [];
+// 审核通过后钱到底去哪了：给每个状态一句人话
+const PO_WHERE = {
+  PENDING: '这笔钱暂时冻结在「审核中」，财务处理后出款。你随时可以点「撤销」把它退回可结算余额。',
+  SUCCEEDED: '已出款到上面填写的收款账户。本环境为模拟出款，不会真的转到银行卡。',
+  FAILED: '未出款，资金已退回你的可结算余额。',
+  CANCELED: '你已撤销这笔申请，资金已退回你的可结算余额。',
+};
+function openPayout(id) {
+  const x = payoutsCache.find((v) => v.numeric_id === id);
+  if (!x) return;
+  const row = (k, v) => `<dt>${esc(k)}</dt><dd>${v}</dd>`;
+  $('payoutDetailBody').innerHTML = row('结算编号', `<span class="mono">${esc(x.id)}</span>`)
+    + row('状态', badge(PO_STATUS, x.status))
+    + row('金额', `<b>${cents(x.amount_cents)}</b>`)
+    + row('收款账户', esc(x.destination || '—'))
+    + row('申请时间', fmtTime(x.created_at))
+    + row('处理时间', x.reviewed_at ? fmtTime(x.reviewed_at) : '—')
+    + (x.review_note ? row('处理备注', esc(x.review_note)) : '');
+  $('payoutWhere').textContent = PO_WHERE[x.status] || '';
+  openModal('payoutDetailModal');
+}
+
 async function cancelPayout(id) {
   const r = await api(`/api/merchant/payouts/${id}/cancel`, { method: 'POST', body: {} });
   if (!r.ok) return toast(r.error || '撤销失败');
